@@ -1,0 +1,63 @@
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="game-container">
+        <div id="setup-screen">
+            <h1 class="game-name">Influencer</h1>
+            <div id="rules">
+                <h2>Rules:</h2>
+                <ul>
+                    <li>Each player has an interest and a social media wall.</li>
+                    <li>Draw cards and post them to your wall to gain followers.</li>
+                    <li>Cards matching your interest gain more followers.</li>
+                    <li>Use tokens to interact with posts (like, dislike, etc).</li>
+                    <li>First player to reach 40 followers wins!</li>
+                </ul>
+            </div>
+            <div class="setup-form">
+                <div>
+                    <label for="player-count">Number of Players:</label>
+                    <select id="player-count" onchange="updatePlayerFields()">
+                        <option value="2" selected>2</option>
+                        <option value="3">3</option>
+                        <option value="4">4</option>
+                    </select>
+                </div>
+                <div id="player-fields">
+                    <div>
+                        <label for="player1-name">Player 1 Name:</label>
+                        <input id="player1-name" value="Player 1">
+                        <label for="player1-interest">Player 1 Interest:</label>
+                        <select id="player1-interest" onchange="updateInterestOptions()">
+                            <option value="" disabled selected>Please select</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="player2-name">Player 2 Name:</label>
+                        <input id="player2-name" value="Player 2">
+                        <label for="player2-interest">Player 2 Interest:</label>
+                        <select id="player2-interest" onchange="updateInterestOptions()">
+                            <option value="" disabled selected>Please select</option>
+                        </select>
+                    </div>
+                </div>
+                <button id="start-game" onclick="startGame()">Start Game</button>
+            </div>
+        </div>
+        <div id="game-board" style="display: none;">
+            <div class="game-header">
+                <h1 class="game-name">Influencer</h1>
+                <div class="turn-info-container">
+                    <div class="turn-info"></div>
+                    <div class="deck-info"></div>
+                </div>
+            </div>
+            <div class="game-content"></div>
+        </div>
+        <div id="score-log"></div>
+        <div id="win-screen"></div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
