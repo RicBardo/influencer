@@ -257,74 +257,56 @@ function calculateScore() {
     let score = 0;
     let log = `Calculating score for ${currentPlayer.name}:\n`;
 
-    // 1. Determine the set of interests that score points for the current player.
     const activeInterests = new Set([currentPlayer.interest]);
-    
-    // 2. Check if the current player is following another player.
     if (currentPlayer.isFollowing) {
         const followedPlayer = currentPlayer.isFollowing;
         if (followedPlayer) {
-            // IMPORTANT: Only the followed player's ORIGINAL interest is acquired.
-            // There is no chain-following of interests.
             activeInterests.add(followedPlayer.interest);
             log += `${currentPlayer.name} is following ${followedPlayer.name}, gaining their interest: ${followedPlayer.interest}.\n`;
         }
     }
 
-    // 3. Score cards on the current player's wall.
-    currentPlayer.wall.forEach(card => {
-        let baseCardScore = card.value;
-        let tokenPoints = 0;
-        let reportTokenPresent = false;
-
-        card.tokens?.forEach(token => {
-            if (token.type === 'like') tokenPoints += 1;
-            else if (token.type === 'dislike') tokenPoints -= 1;
-            else if (token.type === 'report') reportTokenPresent = true;
-        });
-
-        if (reportTokenPresent) {
-            baseCardScore = 0;
-            tokenPoints = 0;
-            log += `Card ${card.interest} (${card.value}) has a report token, nullifying all points.\n`;
-        }
-
-        // Card scores continuously if its interest is one of the active interests.
-        if (activeInterests.has(card.interest)) {
-            score += baseCardScore + tokenPoints;
-            log += `Card ${card.interest} (${card.value}) is an active interest and scored ${baseCardScore + tokenPoints} points.\n`;
-        } 
-        // Card scores only once if it was just posted and is not an active interest.
-        else if (card.turnPosted) {
-            score += baseCardScore + tokenPoints;
-            log += `Card ${card.interest} (${card.value}) was just posted and scored ${baseCardScore + tokenPoints} points (one time).\n`;
-            card.turnPosted = false; // Ensure it doesn't score again
-        }
-    });
-
-    // 4. Score points from 'share' tokens on other players' walls.
     players.forEach(player => {
-        if (player === currentPlayer) return; // Skip self
+        player.wall.forEach(card => {
+            let cardValue = card.value;
+            let tokenPoints = 0;
+            let reportTokenPresent = false;
 
-        player.wall.forEach(otherCard => {
-            let otherCardTokenPoints = 0;
-            let otherCardReportTokenPresent = false;
-
-            if (otherCard.tokens) {
-                otherCard.tokens.forEach(token => {
-                    if (token.type === 'like') otherCardTokenPoints += 1;
-                    else if (token.type === 'dislike') otherCardTokenPoints -= 1;
-                    else if (token.type === 'report') otherCardReportTokenPresent = true;
+            if (card.tokens) {
+                card.tokens.forEach(token => {
+                    if (token.type === 'like') tokenPoints += 1;
+                    else if (token.type === 'dislike') tokenPoints -= 1;
+                    else if (token.type === 'report') reportTokenPresent = true;
                 });
+            }
 
-                if (!otherCardReportTokenPresent) {
-                    otherCard.tokens.forEach(otherToken => {
-                        if (otherToken.type === 'share' && otherToken.player === currentPlayer) {
-                            score += otherCard.value + otherCardTokenPoints;
-                            log += `Share token on ${player.name}'s card added ${otherCard.value + otherCardTokenPoints} points.\n`;
-                        }
-                    });
+            if (reportTokenPresent) {
+                log += `Card ${card.interest} on ${player.name}'s wall is reported, nullifying its points.\n`;
+                return; // Skip this card entirely
+            }
+
+            const totalCardValue = cardValue + tokenPoints;
+
+            // Score for the owner of the wall
+            if (player === currentPlayer) {
+                if (activeInterests.has(card.interest)) {
+                    score += totalCardValue;
+                    log += `Your card ${card.interest} scored ${totalCardValue} points (active interest).\n`;
+                } else if (card.turnPosted) {
+                    score += totalCardValue;
+                    log += `Your new card ${card.interest} scored ${totalCardValue} points (one time).\n`;
+                    card.turnPosted = false;
                 }
+            }
+
+            // Score for share tokens from the current player
+            if (card.tokens) {
+                card.tokens.forEach(token => {
+                    if (token.type === 'share' && token.player === currentPlayer) {
+                        score += totalCardValue;
+                        log += `Your share token on ${player.name}'s card ${card.interest} scored ${totalCardValue} points.\n`;
+                    }
+                });
             }
         });
     });
@@ -474,16 +456,25 @@ function updateGameBoard() {
                 </div>
 
                 <div class="tokens">
-                    <h3 class="wall-hand-title">${isCurrentPlayer && isTokenPhase ? '<span class="blink">Select a token</span>' : 'Tokens'}</h3>
+                    <h3 class="wall-hand-title">${
+                        isCurrentPlayer && isTokenPhase 
+                            ? (selectedToken 
+                                ? `<span class="blink">Play ${selectedToken.type} token</span>` 
+                                : '<span class="blink">Select a token</span>') 
+                            : 'Tokens'
+                    }</h3>
                     <div class="tokens-container">
                         ${player.tokens.map(token => 
-                            Array(token.count).fill().map(() => `
-                                <div class="token"
-                                     onclick="selectToken(this, '${token.type}')"
+                            Array(token.count).fill().map(() => {
+                                const isSelected = selectedToken && selectedToken.type === token.type && player === currentPlayer;
+                                return `
+                                <div class="token ${isSelected ? 'selected' : ''}"
+                                     onclick="selectToken('${token.type}')"
                                      data-tooltip="${token.type}"
                                      style="background-color: ${playerColor};">
                                      <span class="material-icons">${getMaterialIconName(token.type)}</span>
-                                </div>`).join('')).join('')}
+                                </div>`;
+                            }).join('')).join('')}
                     </div>
                 </div>
             </div>
@@ -551,24 +542,20 @@ function autoGenerateName(i) {
     input.focus();
 }
 
-function selectToken(tokenElement, tokenType) {
+function selectToken(tokenType) {
     if (!isTokenPhase) return;
 
-    const isAlreadySelected = tokenElement.classList.contains('selected');
-    
-    // Deselect all tokens first
-    document.querySelectorAll('.token').forEach(t => t.classList.remove('selected'));
-
-    if (isAlreadySelected) {
-        selectedToken = null; // Deselect if clicking the same token
+    // If the clicked token type is already selected, deselect it.
+    if (selectedToken && selectedToken.type === tokenType) {
+        selectedToken = null;
     } else {
-        tokenElement.classList.add('selected'); // Select the new token
+        // Otherwise, select the new token type.
         selectedToken = {
             type: tokenType,
             player: currentPlayer
         };
     }
-    updateGameBoard(); // Re-render to highlight valid targets
+    updateGameBoard(); // Re-render to update highlights and text
 }
 
 function isCardValidTarget(targetPlayer, card) {
