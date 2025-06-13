@@ -13,14 +13,42 @@
         <div id="setup-screen">
             <h1 class="game-name">Influencer</h1>
             <div id="rules">
-                <h2>Rules:</h2>
-                <ul>
-                    <li>Each player has an interest and a social media wall.</li>
-                    <li>Draw cards and post them to your wall c to gain followers.</li>
-                    <li>Cards matching your interest gain more followers.</li>
-                    <li>Use tokens to interact with posts (like, dislike, etc).</li>
-                    <li>First player to reach 40 followers wins!</li>
-                </ul>
+                <p style="max-width:800px;margin:0 auto 18px auto;text-align:left;">Welcome to the world of social media superstardom! Each player is an influencer battling for the spotlight. The first to reach a <strong>Popularity Score of 40</strong> wins the game!</p>
+                <details>
+                    <summary>Your Turn</summary>
+                    <div class="accordion-content">
+                        <ol>
+                            <li><strong>Draw a Card:</strong> Take a new content card from the deck.</li>
+                            <li><strong>Post to Your Wall:</strong> Choose a card from your hand and add it to your Wall. If this makes 4 cards, the oldest post slides off into the Discard Pile. Any tokens on the sliding post are returned to their owners' token pool.</li>
+                            <li><strong>Play Interaction Tokens (optional):</strong> You may play as many tokens as you wish, or none at all, before ending your turn.</li>
+                            <li><strong>End Your Turn:</strong> Click 'End Turn' to calculate your new Popularity Score.</li>
+                        </ol>
+                    </div>
+                </details>
+                <details>
+                    <summary>How to Score Points</summary>
+                    <div class="accordion-content">
+                        <ul>
+                            <li>At the end of your turn, you gain Popularity Points from all posts you are currently scoring (including your Wall and any posts you are sharing).</li>
+                            <li>Posts that match your Interest score for you every turn they are in play.</li>
+                            <li>Any new post you play scores for you once, even if it doesn't match your Interest.</li>
+                            <li>Tokens can change how much a post scores, or who gets points from it.</li>
+                        </ul>
+                    </div>
+                </details>
+                <details>
+                    <summary>Interaction Tokens</summary>
+                    <div class="accordion-content">
+                        <ul>
+                            <li><strong>Like:</strong> Place on any post to add +1 point to its score for as long as the token remains in play.</li>
+                            <li><strong>Dislike:</strong> Place on any post to subtract 1 point from its score for as long as the token remains in play.</li>
+                            <li><strong>Report:</strong> Place on an opponent's post to nullify its score for as long as the token remains in play.</li>
+                            <li><strong>Share:</strong> Place on an opponent's post (that matches your Interest) to score from it every turn, as long as the token remains in play.</li>
+                            <li><strong>Follow:</strong> Place on another player's profile to temporarily gain their Interest and score from their type of content as well as your own. This token is single-use and stays until you follow someone else or are banned.</li>
+                            <li><strong>Ban:</strong> Place on an opponent's profile to remove all of their tokens from the board (including any Follow tokens) and send them to the Dump. The Ban token is also sent to the Dump after use.</li>
+                        </ul>
+                    </div>
+                </details>
             </div>
             <div class="setup-form">
                 <div style="display: flex; align-items: center; justify-content: center; gap: 10px;">
