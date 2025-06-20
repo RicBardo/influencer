@@ -1,15 +1,8 @@
 import React, { useState } from 'react';
 import { Box, Typography, FormControl, InputLabel, Select, MenuItem, TextField, Switch, FormControlLabel, Button, Grid, Accordion, AccordionSummary, AccordionDetails, IconButton } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import { interests } from './interests';
 
-const interests = [
-  { name: 'Fashion', emoji: '👗' },
-  { name: 'Gaming', emoji: '🎮' },
-  { name: 'Music', emoji: '🎵' },
-  { name: 'Travel', emoji: '✈️' },
-  { name: 'Food', emoji: '🍔' },
-  { name: 'Tech', emoji: '💻' }
-];
 const firstNames = ['Alex', 'Taylor', 'Jordan', 'Morgan', 'Casey', 'Jamie', 'Riley', 'Avery', 'Cameron', 'Drew', 'Harper', 'Quinn', 'Reese', 'Skyler', 'Sydney', 'Peyton', 'Rowan', 'Sawyer', 'Emerson', 'Finley'];
 const lastNames = ['Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Miller', 'Davis', 'Garcia', 'Martinez', 'Wilson', 'Anderson', 'Thomas', 'Taylor', 'Moore', 'Jackson', 'Martin', 'Lee', 'Perez', 'Thompson', 'White'];
 
@@ -18,16 +11,15 @@ const rules = [
     title: 'Setup',
     content: `
       <div style="font-weight: bold; font-size: 1.15em; margin-bottom: 6px;">
-        Each influencer chooses their interest and places the corresponding Wall Card and tokens (one for each type) in front of them.
+        Each influencer chooses their interest and starts with 1 token of each type.
       </div>
       <div style="font-weight: bold; margin-bottom: 2px;">Deck composition</div>
       There are two types of cards in the deck: Content Cards (10 for each interest) and Network Cards (10 in total).<br/>
-      Before starting the game, remove from the deck all Content Cards of interests not chosen by any influencer.<br/>
-      <span style="color: #888; font-style: italic;">Example: if 3 people are playing and they chose Fashion, Food and Gaming as their interests, the deck will have 40 cards: 10 for Fashion, 10 for Food, 10 for Gaming, plus 10 Network Cards.</span><br/>
+      Only the interests chosen by players are included in the deck.<br/>
       <br/>
       If it's a 1v1 game — or if you prefer a simpler experience — remove the Network Cards as well.<br/>
       <br/>
-      Once you have assembled the deck, shuffle it and deal 3 cards to each player. Then, place the deck in the center of the table within everyone's reach.
+      Each player is dealt 3 cards to start the game.
     `
   },
   {
@@ -61,9 +53,9 @@ const rules = [
     content: `
       <ol style="margin-top: 4px; margin-bottom: 8px; padding-left: 20px;">
         <li>Draw a card.</li>
-        <li>Play a card. If you play a <b>Content Card</b>, publish it on your wall above any previous posts (newest on top). If your wall already contains 3 cards, the oldest post slides off and goes to a discard pile next to the deck. Any tokens on it return to their owners' hands. If you play a <b>Network Card</b>, its effect is applied immediately, and the card goes straight to the discard pile.</li>
+        <li>Play a card. If you play a <b>Content Card</b>, publish it on your wall above any previous posts (newest on top). If your wall already contains 3 cards, the oldest post slides off and goes to a discard pile. Any tokens on it return to their owners' hands. If you play a <b>Network Card</b>, its effect is applied immediately, and the card goes straight to the discard pile.</li>
         <li>Play a token (optional – see "Tokens" section).</li>
-        <li>Calculate your score (see "Scoring" section) and end your turn.</li>
+        <li>End your turn.</li>
       </ol>
     `
   },
@@ -118,7 +110,14 @@ export default function SetupScreen({ onStart }) {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (onStart && allInterestsSelected) onStart({ players, networkCards });
+    if (onStart && allInterestsSelected) {
+      // Fill in default names if blank
+      const namedPlayers = players.map((p, idx) => ({
+        ...p,
+        name: p.name && p.name.trim() ? p.name : `Player ${idx + 1}`
+      }));
+      onStart({ players: namedPlayers, networkCards });
+    }
   };
 
   return (
@@ -183,7 +182,7 @@ export default function SetupScreen({ onStart }) {
                     const taken = players.some((p, i) => i !== idx && p.interest === interest.name);
                     return (
                       <option key={interest.name} value={interest.name} disabled={taken}>
-                        {interest.emoji} {interest.name}
+                        {interest.icon} {interest.name}
                       </option>
                     );
                   })}

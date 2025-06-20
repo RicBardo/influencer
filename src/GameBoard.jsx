@@ -7,6 +7,7 @@ import ShareIcon from '@mui/icons-material/Share';
 import ReportIcon from '@mui/icons-material/Report';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import BlockIcon from '@mui/icons-material/Block';
+import { interests, getInterestData } from './interests';
 
 const interestColors = {
   fashion: '#FF69B4',
@@ -95,20 +96,29 @@ const BOARD_SIZE = 40;
 
 function createDeck(players, networkCardsEnabled) {
   const newDeck = [];
-  players.forEach(player => {
-    for (let i = 0; i < 6; i++) newDeck.push({ interest: player.interest, value: 1 });
-    for (let i = 0; i < 3; i++) newDeck.push({ interest: player.interest, value: 2 });
-    newDeck.push({ interest: player.interest, value: 3 });
+  // Collect all unique interests in play
+  const interestsInPlay = [...new Set(players.map(p => p.interest))];
+  interestsInPlay.forEach(interest => {
+    for (let i = 0; i < 6; i++) newDeck.push({ interest, value: 1 });
+    for (let i = 0; i < 3; i++) newDeck.push({ interest, value: 2 });
+    newDeck.push({ interest, value: 3 });
   });
   // Add Network Cards if enabled
   if (networkCardsEnabled) {
     newDeck.push(...getNetworkCards());
   }
-  return shuffleDeck(newDeck);
+  console.log('Deck after construction:', newDeck.map(card => card.interest || card.type));
+  return newDeck;
 }
 
 function shuffleDeck(deck) {
-  return [...deck].sort(() => Math.random() - 0.5);
+  // Fisher-Yates shuffle
+  const arr = [...deck];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
 }
 
 function createTokens(playerId, playerCount) {
@@ -168,12 +178,15 @@ export default function GameBoard({ setup }) {
     }));
     // Create and shuffle deck
     let newDeck = createDeck(initialPlayers, setup.networkCards);
+    newDeck = shuffleDeck(newDeck);
+    console.log('Deck after shuffling:', newDeck.map(card => card.interest || card.type));
     // Deal 3 cards to each player
     for (let i = 0; i < 3; i++) {
       initialPlayers.forEach(player => {
-        player.hand.push(newDeck.pop());
+        player.hand.push(newDeck.shift());
       });
     }
+    console.log('Player hands after deal:', initialPlayers.map(p => p.hand.map(card => card.interest || card.type)));
     setPlayers(initialPlayers);
     setDeck(newDeck);
     setDiscard([]);
@@ -193,7 +206,7 @@ export default function GameBoard({ setup }) {
   // Calculate score function
   const calculateScore = () => {
     let score = 0;
-    let log = `Calculating score for ${currentPlayer.name}:\n`;
+    let log = '';
 
     const activeInterests = new Set([currentPlayer.interest]);
     if (currentPlayer.isFollowing) {
@@ -266,10 +279,13 @@ export default function GameBoard({ setup }) {
     const newPlayers = [...players];
     newPlayers[currentIdx] = {
       ...currentPlayer,
-      hand: [...currentPlayer.hand, deck[deck.length - 1]]
+      hand: [...currentPlayer.hand, deck[0]]
     };
     setPlayers(newPlayers);
-    setDeck(deck.slice(0, -1));
+    setDeck(deck.slice(1));
+    // After each draw in handleDrawCard:
+    console.log('Player', currentPlayer.name, 'drew', deck[0]);
+    console.log('Deck after draw:', deck.slice(1).map(card => card.interest + (card.type ? ' (network)' : '')));
     setMustDraw(false);
   };
 
@@ -423,15 +439,6 @@ export default function GameBoard({ setup }) {
     setMustDraw(true);
     setSelectedToken(null);
     setIsTokenPhase(false);
-
-    // After 2 seconds, remove the score update flag
-    setTimeout(() => {
-      setPlayers(prevPlayers => 
-        prevPlayers.map((p, i) => 
-          i === lastPlayerIndex ? { ...p, scoreGainedThisTurn: undefined } : p
-        )
-      );
-    }, 2000);
   };
 
   // Network card effects
@@ -615,9 +622,9 @@ export default function GameBoard({ setup }) {
     );
   }
 
-  // Main header and score log (full width, 48px left/right padding)
+  // Main header and score log (full width, 40px left/right padding)
   const headerAndLog = (
-    <Box sx={{ width: '100%', px: 6, pt: 3, boxSizing: 'border-box' }}>
+    <Box sx={{ width: '100%', px: 5, pt: 3, boxSizing: 'border-box' }}>
       {/* Header */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h4" sx={{ color: 'white', fontWeight: 700, fontFamily: 'Rowdies' }}>
@@ -635,32 +642,18 @@ export default function GameBoard({ setup }) {
           </Typography>
         </Box>
       </Box>
-      {/* Score Log */}
-      {scoreLog && (
-        <Box sx={{ 
-          mb: 2, 
-          p: 2, 
-          background: 'rgba(255,255,255,0.1)', 
-          borderRadius: 1,
-          border: '1px solid rgba(255,255,255,0.2)',
-          mx: 0
-        }}>
-          <Typography variant="body2" sx={{ color: 'white', fontFamily: 'monospace', whiteSpace: 'pre-line' }}>
-            {scoreLog}
-          </Typography>
-        </Box>
-      )}
     </Box>
   );
 
-  // Player row: full width, 48px left/right padding, 32px gap between columns
+  // Player row: full width, 40px left/right padding, 32px gap between columns
   const playerRow = (
     <Box sx={{
-      display: 'flex',
-      gap: 4, // 32px
-      px: 6, // 48px
       width: '100%',
-      maxWidth: '100%',
+      display: 'flex',
+      justifyContent: 'center',
+      gap: 4,
+      overflowX: 'auto',
+      px: 5,
       alignItems: 'flex-start',
       boxSizing: 'border-box',
       mt: 2
@@ -669,7 +662,7 @@ export default function GameBoard({ setup }) {
         const isCurrentPlayer = i === currentIdx;
         const followers = players.filter(p => p.isFollowing && p.isFollowing.name === player.name);
         const playerColor = interestColors[player.interest];
-        const lightTint = `${playerColor}15`; // Very light tint
+        const cardInterestData = getInterestData(player.interest);
         return (
           <Box key={i} sx={{
             display: 'flex',
@@ -680,45 +673,43 @@ export default function GameBoard({ setup }) {
             boxSizing: 'border-box'
           }}>
             {/* Actions Section - only for current player */}
-            {isCurrentPlayer && (
-              <Box sx={{
-                width: '100%',
-                maxWidth: 240,
-                mb: 2,
-                p: 2,
-                background: 'transparent',
-                borderRadius: 1,
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: 1
-              }}>
-                {/* Phase Instructions */}
-                <Typography variant="body2" sx={{ color: 'white', textAlign: 'center', mb: 1, fontSize: '0.875rem' }}>
-                  {mustDraw && "Draw a card to start your turn"}
-                  {!mustDraw && !isTokenPhase && "Play a card from your hand to your wall"}
-                  {isTokenPhase && !selectedToken && "Optionally select a token to play on a card or player"}
-                  {isTokenPhase && selectedToken && `Place your ${selectedToken.type} token on a valid target`}
+            <Box sx={{
+              width: '100%',
+              mb: 2,
+              p: 2,
+              background: 'transparent',
+              borderRadius: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 1,
+              minHeight: 64 // fixed height for alignment
+            }}>
+              {isCurrentPlayer ? (
+                <Typography variant="body2" sx={{ color: 'white', textAlign: 'center', mb: 1, fontSize: '0.95rem' }}>
+                  {mustDraw && "Draw a card"}
+                  {!mustDraw && !isTokenPhase && "Play a card"}
+                  {isTokenPhase && !selectedToken && "Play a token"}
+                  {isTokenPhase && selectedToken && "Place token"}
                 </Typography>
-                {/* Action Buttons */}
-                {mustDraw && (
-                  <Button variant="contained" color="primary" sx={{ minWidth: 120 }} onClick={handleDrawCard}>
-                    Draw Card
-                  </Button>
-                )}
-                {isTokenPhase && (
-                  <Button variant="contained" color="secondary" sx={{ minWidth: 120 }} onClick={handleEndTurn}>
-                    End Turn
-                  </Button>
-                )}
-              </Box>
-            )}
+              ) : null}
+              {isCurrentPlayer && mustDraw && (
+                <Button variant="contained" color="primary" sx={{ minWidth: 120 }} onClick={handleDrawCard}>
+                  Draw Card
+                </Button>
+              )}
+              {isCurrentPlayer && isTokenPhase && (
+                <Button variant="contained" color="secondary" sx={{ minWidth: 120 }} onClick={handleEndTurn}>
+                  End Turn
+                </Button>
+              )}
+            </Box>
             <Paper elevation={isCurrentPlayer ? 6 : 2} sx={{
               border: `3px solid ${playerColor}`,
               borderRadius: 2,
               p: 2,
               width: '100%',
-              background: lightTint,
+              background: '#fff',
               boxShadow: isCurrentPlayer ? `0 0 20px 8px ${playerColor}40` : undefined,
               display: 'flex', flexDirection: 'column', alignItems: 'center',
               gap: 1,
@@ -763,15 +754,18 @@ export default function GameBoard({ setup }) {
               }}
                 onClick={isTokenPhase && isProfileValidTarget(i) ? () => handlePlaceTokenOnProfile(i) : undefined}
               >
-                <Typography fontWeight={700}>{player.name}</Typography>
-                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-                  <Typography>{player.interest ? player.interest.charAt(0).toUpperCase() + player.interest.slice(1) : ''}</Typography>
-                  {player.isFollowing && (
-                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                      Following {player.isFollowing.name}
-                    </Typography>
-                  )}
+                <Box sx={{ display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                  <Typography fontWeight={700}>{player.name}</Typography>
+                  <Box sx={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 1 }}>
+                    <span style={{ fontSize: 22 }}>{cardInterestData.icon}</span>
+                    <Typography>{player.interest ? player.interest.charAt(0).toUpperCase() + player.interest.slice(1) : ''}</Typography>
+                  </Box>
                 </Box>
+                {player.isFollowing && (
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                    Following {player.isFollowing.name}
+                  </Typography>
+                )}
               </Box>
               <Box sx={{ width: '100%', height: 18, background: '#eee', borderRadius: 1, mb: 1, position: 'relative' }}>
                 <LinearProgress variant="determinate" value={Math.min(100, (player.position / BOARD_SIZE) * 100)} sx={{ height: 18, borderRadius: 1, background: '#eee', '& .MuiLinearProgress-bar': { background: playerColor } }} />
@@ -786,111 +780,116 @@ export default function GameBoard({ setup }) {
               <Box sx={{ width: '100%', height: 200, background: '#f8f8ff', borderRadius: 1, mb: 1, p: 1, px: 2, boxSizing: 'border-box' }}>
                 <Typography variant="caption" color="text.secondary">Wall</Typography>
                 <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', gap: 1, mt: 0.5, height: 'calc(100% - 20px)', overflowY: 'auto' }}>
-                  {player.wall.map((card, idx) => (
-                    <Paper key={idx} sx={{
-                      p: 1,
-                      width: '100%',
-                      maxWidth: 240,
-                      minWidth: 0,
-                      minHeight: 48,
-                      textAlign: 'center',
-                      border: `2px solid ${interestColors[card.interest]}`,
-                      position: 'relative',
-                      background: isTokenPhase && isCardValidTarget(player, card) ? '#f3eaff' : undefined,
-                      cursor: isTokenPhase && isCardValidTarget(player, card) ? 'pointer' : undefined,
-                      boxShadow: isTokenPhase && isCardValidTarget(player, card) ? 'inset 0 0 10px 3px #4cff8d, 0 0 10px 3px #4cff8d' : undefined,
-                      margin: '8px auto',
-                      mx: 'auto'
-                    }}
-                      onClick={isTokenPhase && isCardValidTarget(player, card) ? () => handlePlaceTokenOnCard(i, idx) : undefined}
-                    >
-                      <span style={{ fontSize: 20 }}>{interests.find(x => x.name === card.interest)?.icon}</span>&nbsp;
-                      <span style={{ fontWeight: 700 }}>{card.interest.charAt(0).toUpperCase() + card.interest.slice(1)}</span>&nbsp;
-                      <span>({card.value})</span>
-                      {/* Show tokens on card */}
-                      {card.tokens && card.tokens.length > 0 && (
-                        <Box sx={{ display: 'flex', gap: 0.5, mt: 0.5, justifyContent: 'center' }}>
-                          {card.tokens.map((token, tIdx) => (
-                            <Box key={tIdx} sx={{
-                              width: 20,
-                              height: 20,
-                              borderRadius: '50%',
-                              backgroundColor: interestColors[token.player.interest],
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              color: 'white',
-                              fontSize: 12
-                            }} title={token.type}>
-                              {getMaterialIcon(token.type)}
-                            </Box>
-                          ))}
-                        </Box>
-                      )}
-                    </Paper>
-                  ))}
+                  {player.wall.map((card, idx) => {
+                    const cardInterestData = getInterestData(card.interest);
+                    return (
+                      <Paper key={idx} sx={{
+                        p: 1,
+                        width: '100%',
+                        maxWidth: 240,
+                        minWidth: 0,
+                        minHeight: 48,
+                        textAlign: 'center',
+                        border: `2px solid ${cardInterestData.color}`,
+                        background: '#fff',
+                        cursor: isTokenPhase && isCardValidTarget(player, card) ? 'pointer' : undefined,
+                        boxShadow: isTokenPhase && isCardValidTarget(player, card) ? 'inset 0 0 10px 3px #4cff8d, 0 0 10px 3px #4cff8d' : undefined,
+                        margin: '8px auto',
+                        mx: 'auto'
+                      }}
+                        onClick={isTokenPhase && isCardValidTarget(player, card) ? () => handlePlaceTokenOnCard(i, idx) : undefined}
+                      >
+                        <span style={{ fontSize: 20 }}>{cardInterestData.icon}</span>&nbsp;
+                        <span style={{ fontWeight: 700 }}>{card.interest ? card.interest.charAt(0).toUpperCase() + card.interest.slice(1) : ''}</span>&nbsp;
+                        <span>({card.value})</span>
+                        {/* Show tokens on card */}
+                        {card.tokens && card.tokens.length > 0 && (
+                          <Box sx={{ display: 'flex', gap: 0.5, mt: 0.5, justifyContent: 'center' }}>
+                            {card.tokens.map((token, tIdx) => (
+                              <Box key={tIdx} sx={{
+                                width: 20,
+                                height: 20,
+                                borderRadius: '50%',
+                                backgroundColor: getInterestData(token.player.interest).color,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                color: 'white',
+                                fontSize: 12
+                              }} title={token.type}>
+                                {getMaterialIcon(token.type)}
+                              </Box>
+                            ))}
+                          </Box>
+                        )}
+                      </Paper>
+                    );
+                  })}
                 </Box>
               </Box>
               {/* Hand - 16px left/right padding */}
               <Box sx={{ width: '100%', minHeight: 40, background: '#f8f8ff', borderRadius: 1, mb: 1, p: 1, px: 2, boxSizing: 'border-box' }}>
                 <Typography variant="caption" color="text.secondary">Hand</Typography>
                 <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', gap: 1, mt: 0.5 }}>
-                  {player.hand.map((card, idx) => (
-                    i === currentIdx && !mustDraw && !isTokenPhase ? (
-                      <Paper key={idx} sx={{ 
-                        p: 1, 
-                        width: '100%',
-                        maxWidth: 240,
-                        minWidth: 0,
-                        minHeight: 48, 
-                        textAlign: 'center', 
-                        border: `2px solid ${card.type === 'network' ? '#9147ff' : interestColors[card.interest]}`, 
-                        cursor: 'pointer', 
-                        background: card.type === 'network' ? '#f0e6ff' : '#fff',
-                        margin: '8px auto',
-                        mx: 'auto'
-                      }} onClick={() => handlePlayCard(idx)}>
-                        {card.type === 'network' ? (
-                          <>
-                            <div style={{ fontWeight: 700, fontSize: '0.8rem', color: '#9147ff' }}>{card.title}</div>
-                            <div style={{ fontSize: '0.7rem', color: '#666' }}>{card.description}</div>
-                          </>
-                        ) : (
-                          <>
-                            <span style={{ fontSize: 20 }}>{interests.find(i => i.name === card.interest)?.icon}</span>&nbsp;
-                            <span style={{ fontWeight: 700 }}>{card.interest.charAt(0).toUpperCase() + card.interest.slice(1)}</span>&nbsp;
-                            <span>({card.value})</span>
-                          </>
-                        )}
-                      </Paper>
-                    ) : (
-                      <Paper key={idx} sx={{ 
-                        p: 1, 
-                        width: '100%',
-                        maxWidth: 240,
-                        minWidth: 0,
-                        minHeight: 48, 
-                        textAlign: 'center', 
-                        border: `2px solid ${card.type === 'network' ? '#9147ff' : interestColors[card.interest]}`,
-                        background: card.type === 'network' ? '#f0e6ff' : '#fff',
-                        margin: '8px auto',
-                        mx: 'auto'
-                      }}>
-                        {card.type === 'network' ? (
-                          <>
-                            <div style={{ fontWeight: 700, fontSize: '0.8rem', color: '#9147ff' }}>{card.title}</div>
-                            <div style={{ fontSize: '0.7rem', color: '#666' }}>{card.description}</div>
-                          </>
-                        ) : (
-                          <>
-                            <span style={{ fontSize: 20 }}>{interests.find(i => i.name === card.interest)?.icon}</span>&nbsp;
-                            <span style={{ fontWeight: 700 }}>{card.interest.charAt(0).toUpperCase() + card.interest.slice(1)}</span>&nbsp;
-                            <span>({card.value})</span>
-                          </>
-                        )}
-                      </Paper>
-                    )
-                  ))}
+                  {player.hand.map((card, idx) => {
+                    const cardInterestData = getInterestData(card.interest);
+                    return (
+                      i === currentIdx && !mustDraw && !isTokenPhase ? (
+                        <Paper key={idx} sx={{ 
+                          p: 1, 
+                          width: '100%',
+                          maxWidth: 240,
+                          minWidth: 0,
+                          minHeight: 48, 
+                          textAlign: 'center', 
+                          border: `2px solid ${card.type === 'network' ? '#9147ff' : cardInterestData.color}`, 
+                          cursor: 'pointer', 
+                          background: '#fff',
+                          margin: '8px auto',
+                          mx: 'auto'
+                        }} onClick={() => handlePlayCard(idx)}>
+                          {card.type === 'network' ? (
+                            <>
+                              <div style={{ fontWeight: 700, fontSize: '0.8rem', color: '#9147ff' }}>{card.title}</div>
+                              <div style={{ fontSize: '0.7rem', color: '#666' }}>{card.description}</div>
+                            </>
+                          ) : (
+                            <>
+                              <span style={{ fontSize: 20 }}>{cardInterestData.icon}</span>&nbsp;
+                              <span style={{ fontWeight: 700 }}>{card.interest ? card.interest.charAt(0).toUpperCase() + card.interest.slice(1) : ''}</span>&nbsp;
+                              <span>({card.value})</span>
+                            </>
+                          )}
+                        </Paper>
+                      ) : (
+                        <Paper key={idx} sx={{ 
+                          p: 1, 
+                          width: '100%',
+                          maxWidth: 240,
+                          minWidth: 0,
+                          minHeight: 48, 
+                          textAlign: 'center', 
+                          border: `2px solid ${card.type === 'network' ? '#9147ff' : cardInterestData.color}`,
+                          background: '#fff',
+                          margin: '8px auto',
+                          mx: 'auto'
+                        }}>
+                          {card.type === 'network' ? (
+                            <>
+                              <div style={{ fontWeight: 700, fontSize: '0.8rem', color: '#9147ff' }}>{card.title}</div>
+                              <div style={{ fontSize: '0.7rem', color: '#666' }}>{card.description}</div>
+                            </>
+                          ) : (
+                            <>
+                              <span style={{ fontSize: 20 }}>{cardInterestData.icon}</span>&nbsp;
+                              <span style={{ fontWeight: 700 }}>{card.interest ? card.interest.charAt(0).toUpperCase() + card.interest.slice(1) : ''}</span>&nbsp;
+                              <span>({card.value})</span>
+                            </>
+                          )}
+                        </Paper>
+                      )
+                    );
+                  })}
                 </Box>
               </Box>
               {/* Token Pool */}
@@ -904,7 +903,7 @@ export default function GameBoard({ setup }) {
                         width: 40,
                         height: 40,
                         borderRadius: '50%',
-                        backgroundColor: token.count > 0 ? playerColor : '#ccc',
+                        backgroundColor: token.count > 0 ? cardInterestData.color : '#ccc',
                         color: 'white',
                         cursor: token.count > 0 ? 'pointer' : 'default',
                         transform: selectedToken && selectedToken.type === token.type ? 'scale(1.15)' : 'scale(1)',
@@ -930,8 +929,14 @@ export default function GameBoard({ setup }) {
     </Box>
   );
 
+  console.log('Players state before render:', players.map(p => ({
+    name: p.name,
+    interest: p.interest,
+    hand: p.hand.map(card => card.interest || card.type)
+  })));
+
   return (
-    <Box sx={{ width: '100vw', height: '100vh', minHeight: '100vh', boxSizing: 'border-box', background: 'none', margin: 0, padding: 0 }}>
+    <>
       {headerAndLog}
       {playerRow}
       {/* Modal Dialog */}
@@ -950,15 +955,6 @@ export default function GameBoard({ setup }) {
           ))}
         </DialogActions>
       </Dialog>
-    </Box>
+    </>
   );
-}
-
-const interests = [
-  { name: 'fashion', icon: '👗' },
-  { name: 'tourism', icon: '🌍' },
-  { name: 'food', icon: '🍔' },
-  { name: 'fitness', icon: '🏋️' },
-  { name: 'music', icon: '🎵' },
-  { name: 'gaming', icon: '🎮' }
-]; 
+} 

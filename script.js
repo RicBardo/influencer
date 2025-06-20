@@ -1207,3 +1207,4 @@ initGame();
 window.addEventListener('DOMContentLoaded', () => {
     updateNetworkToggleLabel();
 });
+ 
