@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Typography, Paper, Button, LinearProgress, IconButton, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material';
+import { Box, Typography, Paper, Button, LinearProgress, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material';
 import PlayerColumn from './PlayerColumn';
 import ThumbUpIcon from '@mui/icons-material/ThumbUp';
 import ThumbDownIcon from '@mui/icons-material/ThumbDown';
@@ -8,15 +8,6 @@ import ReportIcon from '@mui/icons-material/Report';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import BlockIcon from '@mui/icons-material/Block';
 import { interests, getInterestData } from './interests';
-
-const interestColors = {
-  fashion: '#FF69B4',
-  tourism: '#87CEEB',
-  food: '#FFA500',
-  fitness: '#32CD32',
-  music: '#9370DB',
-  gaming: '#FF6347'
-};
 
 // Network Cards Data
 const NETWORK_CARDS = [
@@ -107,7 +98,6 @@ function createDeck(players, networkCardsEnabled) {
   if (networkCardsEnabled) {
     newDeck.push(...getNetworkCards());
   }
-  console.log('Deck after construction:', newDeck.map(card => card.interest || card.type));
   return newDeck;
 }
 
@@ -353,8 +343,24 @@ export default function GameBoard({ setup }) {
     newPlayers[playerIdx].wall[cardIdx] = targetCard;
     
     // Remove token from current player
-    const tokenObj = newPlayers[currentIdx].tokens.find(t => t.type === selectedToken.type);
-    if (tokenObj && tokenObj.count > 0) tokenObj.count -= 1;
+    let newTokens = newPlayers[currentIdx].tokens.map(t => {
+      if (t.type === selectedToken.type) {
+        return { ...t, count: t.count - 1 };
+      }
+      return t;
+    }).filter(t => t.count > 0);
+    newPlayers[currentIdx].tokens = newTokens;
+    
+    // Special effects
+    if (selectedToken.type === 'share') {
+      // Add a copy of the card to the current player's wall
+      const sharedCard = { ...targetCard, tokens: [] };
+      newPlayers[currentIdx].wall = [...newPlayers[currentIdx].wall, sharedCard];
+    } else if (selectedToken.type === 'report') {
+      // Set the card's value to 0
+      targetCard.value = 0;
+      newPlayers[playerIdx].wall[cardIdx] = targetCard;
+    }
     
     setPlayers(newPlayers);
     setSelectedToken(null);
@@ -366,41 +372,46 @@ export default function GameBoard({ setup }) {
     if (!isProfileValidTarget(playerIdx)) return;
     
     const newPlayers = [...players];
-    const tokenToPlay = newPlayers[currentIdx].tokens.find(t => t.type === selectedToken.type);
-    if (tokenToPlay && tokenToPlay.count > 0) {
-      if (tokenToPlay.type === 'follow') {
-        // If player is already following someone, just update the link.
-        if (newPlayers[currentIdx].isFollowing) {
-          const previouslyFollowedPlayer = newPlayers[currentIdx].isFollowing;
-          if (previouslyFollowedPlayer.followers) {
-            previouslyFollowedPlayer.followers = previouslyFollowedPlayer.followers.filter(p => p !== newPlayers[currentIdx]);
-          }
-        }
-        newPlayers[currentIdx].isFollowing = newPlayers[playerIdx];
-        if (!newPlayers[playerIdx].followers) newPlayers[playerIdx].followers = [];
-        newPlayers[playerIdx].followers.push(newPlayers[currentIdx]);
-      } else if (tokenToPlay.type === 'ban') {
-        // Remove all tokens of the banned player
-        newPlayers.forEach(player => {
-          player.wall.forEach(card => {
-            if (card.tokens) {
-              card.tokens = card.tokens.filter(token => token.player !== newPlayers[playerIdx]);
-            }
-          });
-        });
-        // Remove follow tokens
-        newPlayers.forEach(player => {
-          if (player.isFollowing === newPlayers[playerIdx]) {
-            player.isFollowing = null;
-          }
-          if (player.followers) {
-            player.followers = player.followers.filter(p => p !== newPlayers[playerIdx]);
-          }
-        });
-        // Add ban token to dump
-        setTokensDump([...tokensDump, { type: 'ban', player: newPlayers[currentIdx] }]);
+    let newTokens = newPlayers[currentIdx].tokens.map(t => {
+      if (t.type === selectedToken.type) {
+        return { ...t, count: t.count - 1 };
       }
-      tokenToPlay.count -= 1;
+      return t;
+    }).filter(t => t.count > 0);
+    newPlayers[currentIdx].tokens = newTokens;
+    
+    const tokenToPlay = newPlayers[currentIdx].tokens.find(t => t.type === selectedToken.type);
+    if (selectedToken.type === 'follow') {
+      // If player is already following someone, just update the link.
+      if (newPlayers[currentIdx].isFollowing) {
+        const previouslyFollowedPlayer = newPlayers[currentIdx].isFollowing;
+        if (previouslyFollowedPlayer.followers) {
+          previouslyFollowedPlayer.followers = previouslyFollowedPlayer.followers.filter(p => p !== newPlayers[currentIdx]);
+        }
+      }
+      newPlayers[currentIdx].isFollowing = newPlayers[playerIdx];
+      if (!newPlayers[playerIdx].followers) newPlayers[playerIdx].followers = [];
+      newPlayers[playerIdx].followers.push(newPlayers[currentIdx]);
+    } else if (selectedToken.type === 'ban') {
+      // Remove all tokens of the banned player
+      newPlayers.forEach(player => {
+        player.wall.forEach(card => {
+          if (card.tokens) {
+            card.tokens = card.tokens.filter(token => token.player !== newPlayers[playerIdx]);
+          }
+        });
+      });
+      // Remove follow tokens
+      newPlayers.forEach(player => {
+        if (player.isFollowing === newPlayers[playerIdx]) {
+          player.isFollowing = null;
+        }
+        if (player.followers) {
+          player.followers = player.followers.filter(p => p !== newPlayers[playerIdx]);
+        }
+      });
+      // Add ban token to dump
+      setTokensDump([...tokensDump, { type: 'ban', player: newPlayers[currentIdx] }]);
     }
     
     setPlayers(newPlayers);
@@ -550,19 +561,20 @@ export default function GameBoard({ setup }) {
 
   const isCardValidTarget = (targetPlayer, card) => {
     if (!isTokenPhase || !selectedToken) return false;
-    
-    // Can't place tokens on your own cards during token phase
-    if (targetPlayer === currentPlayer) return false;
-    
-    // Check if the card already has a token of the same type from the current player
+    // Only allow one of each token per card per player
     if (card.tokens) {
-      const hasSameToken = card.tokens.some(token => 
-        token.type === selectedToken.type && token.player === currentPlayer
-      );
+      const hasSameToken = card.tokens.some(token => token.type === selectedToken.type && token.player === currentPlayer);
       if (hasSameToken) return false;
     }
-    
-    return true;
+    // Like/Dislike: any card
+    if (selectedToken.type === 'like' || selectedToken.type === 'dislike') {
+      return true;
+    }
+    // Share/Report: only on other players' cards
+    if ((selectedToken.type === 'share' || selectedToken.type === 'report') && targetPlayer !== currentPlayer) {
+      return true;
+    }
+    return false;
   };
 
   const isProfileValidTarget = (targetPlayerIndex) => {
@@ -661,8 +673,8 @@ export default function GameBoard({ setup }) {
       {players.map((player, i) => {
         const isCurrentPlayer = i === currentIdx;
         const followers = players.filter(p => p.isFollowing && p.isFollowing.name === player.name);
-        const playerColor = interestColors[player.interest];
         const cardInterestData = getInterestData(player.interest);
+        const playerColor = cardInterestData.color;
         return (
           <Box key={i} sx={{
             display: 'flex',
@@ -675,33 +687,59 @@ export default function GameBoard({ setup }) {
             {/* Actions Section - only for current player */}
             <Box sx={{
               width: '100%',
-              mb: 2,
-              p: 2,
+              height: 64,
               background: 'transparent',
               borderRadius: 1,
               display: 'flex',
-              flexDirection: 'column',
               alignItems: 'center',
-              gap: 1,
-              minHeight: 64 // fixed height for alignment
+              justifyContent: 'center',
+              minHeight: 64,
+              mb: 0
             }}>
-              {isCurrentPlayer ? (
-                <Typography variant="body2" sx={{ color: 'white', textAlign: 'center', mb: 1, fontSize: '0.95rem' }}>
-                  {mustDraw && "Draw a card"}
-                  {!mustDraw && !isTokenPhase && "Play a card"}
-                  {isTokenPhase && !selectedToken && "Play a token"}
-                  {isTokenPhase && selectedToken && "Place token"}
-                </Typography>
-              ) : null}
-              {isCurrentPlayer && mustDraw && (
-                <Button variant="contained" color="primary" sx={{ minWidth: 120 }} onClick={handleDrawCard}>
-                  Draw Card
-                </Button>
-              )}
-              {isCurrentPlayer && isTokenPhase && (
-                <Button variant="contained" color="secondary" sx={{ minWidth: 120 }} onClick={handleEndTurn}>
-                  End Turn
-                </Button>
+              {isCurrentPlayer && (
+                mustDraw ? (
+                  <Button
+                    variant="contained"
+                    sx={{
+                      minWidth: 120,
+                      borderRadius: 2,
+                      backgroundColor: playerColor,
+                      color: '#fff',
+                      transition: 'all 0.15s',
+                      '&:hover': {
+                        transform: 'scale(1.05)',
+                        filter: 'brightness(0.93)',
+                        backgroundColor: playerColor
+                      }
+                    }}
+                    onClick={handleDrawCard}
+                  >
+                    Draw Card
+                  </Button>
+                ) : isTokenPhase ? (
+                  <Button
+                    variant="contained"
+                    sx={{
+                      minWidth: 120,
+                      borderRadius: 2,
+                      backgroundColor: playerColor,
+                      color: '#fff',
+                      transition: 'all 0.15s',
+                      '&:hover': {
+                        transform: 'scale(1.05)',
+                        filter: 'brightness(0.93)',
+                        backgroundColor: playerColor
+                      }
+                    }}
+                    onClick={handleEndTurn}
+                  >
+                    End Turn
+                  </Button>
+                ) : (
+                  <Typography variant="body2" sx={{ color: 'white', textAlign: 'center', fontSize: '0.95rem' }}>
+                    Play a card
+                  </Typography>
+                )
               )}
             </Box>
             <Paper elevation={isCurrentPlayer ? 6 : 2} sx={{
@@ -750,7 +788,9 @@ export default function GameBoard({ setup }) {
                 borderRadius: 1,
                 background: isTokenPhase && isProfileValidTarget(i) ? '#f3eaff' : undefined,
                 cursor: isTokenPhase && isProfileValidTarget(i) ? 'pointer' : undefined,
-                border: isTokenPhase && isProfileValidTarget(i) ? '2px solid #4cff8d' : undefined
+                border: isTokenPhase && isProfileValidTarget(i) ? '2px solid #4cff8d' : undefined,
+                outline: isTokenPhase && isProfileValidTarget(i) ? '2px solid #4cff8d' : undefined,
+                zIndex: isTokenPhase && isProfileValidTarget(i) ? 3 : 1
               }}
                 onClick={isTokenPhase && isProfileValidTarget(i) ? () => handlePlaceTokenOnProfile(i) : undefined}
               >
@@ -777,9 +817,9 @@ export default function GameBoard({ setup }) {
                 )}
               </Box>
               {/* Wall - fixed height for 3 cards, 16px left/right padding */}
-              <Box sx={{ width: '100%', height: 200, background: '#f8f8ff', borderRadius: 1, mb: 1, p: 1, px: 2, boxSizing: 'border-box' }}>
-                <Typography variant="caption" color="text.secondary">Wall</Typography>
-                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', gap: 1, mt: 0.5, height: 'calc(100% - 20px)', overflowY: 'auto' }}>
+              <Box sx={{ width: '100%', height: 268, background: '#f8f8ff', borderRadius: 1, p: 1, px: 2, boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
+                <Typography variant="caption" color="text.secondary" sx={{ flex: '0 0 auto' }}>Wall</Typography>
+                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', gap: 1, mt: 0.5, height: '100%', overflowY: 'auto', justifyContent: 'flex-end', flex: '1 1 0' }}>
                   {player.wall.map((card, idx) => {
                     const cardInterestData = getInterestData(card.interest);
                     return (
@@ -789,33 +829,54 @@ export default function GameBoard({ setup }) {
                         maxWidth: 240,
                         minWidth: 0,
                         minHeight: 48,
-                        textAlign: 'center',
+                        display: 'flex',
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
                         border: `2px solid ${cardInterestData.color}`,
                         background: '#fff',
                         cursor: isTokenPhase && isCardValidTarget(player, card) ? 'pointer' : undefined,
                         boxShadow: isTokenPhase && isCardValidTarget(player, card) ? 'inset 0 0 10px 3px #4cff8d, 0 0 10px 3px #4cff8d' : undefined,
-                        margin: '8px auto',
-                        mx: 'auto'
+                        borderRadius: 2,
+                        margin: 0,
+                        position: 'relative',
+                        overflow: 'visible',
+                        outline: isTokenPhase && isCardValidTarget(player, card) ? '2px solid #4cff8d' : undefined,
+                        zIndex: isTokenPhase && isCardValidTarget(player, card) ? 3 : 1,
+                        transition: 'all 0.15s',
+                        '&:hover': isTokenPhase && isCardValidTarget(player, card) ? { transform: 'scale(1.05)', filter: 'brightness(0.93)' } : {}
                       }}
                         onClick={isTokenPhase && isCardValidTarget(player, card) ? () => handlePlaceTokenOnCard(i, idx) : undefined}
                       >
-                        <span style={{ fontSize: 20 }}>{cardInterestData.icon}</span>&nbsp;
-                        <span style={{ fontWeight: 700 }}>{card.interest ? card.interest.charAt(0).toUpperCase() + card.interest.slice(1) : ''}</span>&nbsp;
-                        <span>({card.value})</span>
-                        {/* Show tokens on card */}
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <span style={{ fontSize: 20 }}>{cardInterestData.icon}</span>
+                          <span style={{ fontWeight: 700 }}>{card.interest ? card.interest.charAt(0).toUpperCase() + card.interest.slice(1) : ''}</span>
+                        </Box>
+                        <span style={{ fontWeight: 900, fontSize: 22, color: cardInterestData.color }}>{card.value}</span>
+                        {/* Tokens on card, absolutely centered and overlapping */}
                         {card.tokens && card.tokens.length > 0 && (
-                          <Box sx={{ display: 'flex', gap: 0.5, mt: 0.5, justifyContent: 'center' }}>
+                          <Box sx={{
+                            position: 'absolute',
+                            top: '50%',
+                            left: '50%',
+                            transform: 'translate(-50%, -50%)',
+                            display: 'flex',
+                            flexDirection: 'row',
+                            gap: 0.5,
+                            zIndex: 2
+                          }}>
                             {card.tokens.map((token, tIdx) => (
                               <Box key={tIdx} sx={{
-                                width: 20,
-                                height: 20,
+                                width: 40,
+                                height: 40,
                                 borderRadius: '50%',
                                 backgroundColor: getInterestData(token.player.interest).color,
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
                                 color: 'white',
-                                fontSize: 12
+                                fontSize: 22,
+                                boxShadow: '0 2px 6px rgba(0,0,0,0.18)'
                               }} title={token.type}>
                                 {getMaterialIcon(token.type)}
                               </Box>
@@ -828,98 +889,116 @@ export default function GameBoard({ setup }) {
                 </Box>
               </Box>
               {/* Hand - 16px left/right padding */}
-              <Box sx={{ width: '100%', minHeight: 40, background: '#f8f8ff', borderRadius: 1, mb: 1, p: 1, px: 2, boxSizing: 'border-box' }}>
+              <Box sx={{ width: '100%', minHeight: 40, background: '#f8f8ff', borderRadius: 1, p: 1, px: 2, boxSizing: 'border-box' }}>
                 <Typography variant="caption" color="text.secondary">Hand</Typography>
                 <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', gap: 1, mt: 0.5 }}>
                   {player.hand.map((card, idx) => {
                     const cardInterestData = getInterestData(card.interest);
+                    const isPlayable = i === currentIdx && !mustDraw && !isTokenPhase;
                     return (
-                      i === currentIdx && !mustDraw && !isTokenPhase ? (
-                        <Paper key={idx} sx={{ 
-                          p: 1, 
-                          width: '100%',
-                          maxWidth: 240,
-                          minWidth: 0,
-                          minHeight: 48, 
-                          textAlign: 'center', 
-                          border: `2px solid ${card.type === 'network' ? '#9147ff' : cardInterestData.color}`, 
-                          cursor: 'pointer', 
-                          background: '#fff',
-                          margin: '8px auto',
-                          mx: 'auto'
-                        }} onClick={() => handlePlayCard(idx)}>
-                          {card.type === 'network' ? (
-                            <>
-                              <div style={{ fontWeight: 700, fontSize: '0.8rem', color: '#9147ff' }}>{card.title}</div>
-                              <div style={{ fontSize: '0.7rem', color: '#666' }}>{card.description}</div>
-                            </>
-                          ) : (
-                            <>
-                              <span style={{ fontSize: 20 }}>{cardInterestData.icon}</span>&nbsp;
-                              <span style={{ fontWeight: 700 }}>{card.interest ? card.interest.charAt(0).toUpperCase() + card.interest.slice(1) : ''}</span>&nbsp;
-                              <span>({card.value})</span>
-                            </>
-                          )}
-                        </Paper>
-                      ) : (
-                        <Paper key={idx} sx={{ 
-                          p: 1, 
-                          width: '100%',
-                          maxWidth: 240,
-                          minWidth: 0,
-                          minHeight: 48, 
-                          textAlign: 'center', 
-                          border: `2px solid ${card.type === 'network' ? '#9147ff' : cardInterestData.color}`,
-                          background: '#fff',
-                          margin: '8px auto',
-                          mx: 'auto'
-                        }}>
-                          {card.type === 'network' ? (
-                            <>
-                              <div style={{ fontWeight: 700, fontSize: '0.8rem', color: '#9147ff' }}>{card.title}</div>
-                              <div style={{ fontSize: '0.7rem', color: '#666' }}>{card.description}</div>
-                            </>
-                          ) : (
-                            <>
-                              <span style={{ fontSize: 20 }}>{cardInterestData.icon}</span>&nbsp;
-                              <span style={{ fontWeight: 700 }}>{card.interest ? card.interest.charAt(0).toUpperCase() + card.interest.slice(1) : ''}</span>&nbsp;
-                              <span>({card.value})</span>
-                            </>
-                          )}
-                        </Paper>
-                      )
+                      <Paper key={idx} sx={{
+                        p: 1,
+                        width: '100%',
+                        maxWidth: 240,
+                        minWidth: 0,
+                        minHeight: 48,
+                        display: 'flex',
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        border: `2px solid ${card.type === 'network' ? '#9147ff' : cardInterestData.color}`,
+                        background: '#fff',
+                        cursor: isPlayable ? 'pointer' : undefined,
+                        borderRadius: 2,
+                        margin: 0,
+                        position: 'relative',
+                        overflow: 'visible',
+                        boxShadow: isPlayable ? '0 0 8px 2px #9147ff40' : undefined,
+                        outline: isTokenPhase && isCardValidTarget(player, card) ? '2px solid #4cff8d' : undefined,
+                        zIndex: isTokenPhase && isCardValidTarget(player, card) ? 3 : 1,
+                        transition: 'all 0.15s',
+                        '&:hover': isPlayable ? { transform: 'scale(1.05)', filter: 'brightness(0.93)' } : {}
+                      }} onClick={isPlayable ? () => handlePlayCard(idx) : undefined}>
+                        {card.type === 'network' ? (
+                          <Box sx={{ width: '100%' }}>
+                            <div style={{ fontWeight: 700, fontSize: '0.8rem', color: '#9147ff' }}>{card.title}</div>
+                            <div style={{ fontSize: '0.7rem', color: '#666' }}>{card.description}</div>
+                          </Box>
+                        ) : (
+                          <>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <span style={{ fontSize: 20 }}>{cardInterestData.icon}</span>
+                              <span style={{ fontWeight: 700 }}>{card.interest ? card.interest.charAt(0).toUpperCase() + card.interest.slice(1) : ''}</span>
+                            </Box>
+                            <span style={{ fontWeight: 900, fontSize: 22, color: cardInterestData.color }}>{card.value}</span>
+                            {/* Tokens on card, absolutely centered and overlapping (should be rare in hand, but for consistency) */}
+                            {card.tokens && card.tokens.length > 0 && (
+                              <Box sx={{
+                                position: 'absolute',
+                                top: '50%',
+                                left: '50%',
+                                transform: 'translate(-50%, -50%)',
+                                display: 'flex',
+                                flexDirection: 'row',
+                                gap: 0.5,
+                                zIndex: 2
+                              }}>
+                                {card.tokens.map((token, tIdx) => (
+                                  <Box key={tIdx} sx={{
+                                    width: 40,
+                                    height: 40,
+                                    borderRadius: '50%',
+                                    backgroundColor: getInterestData(token.player.interest).color,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    color: 'white',
+                                    fontSize: 22,
+                                    boxShadow: '0 2px 6px rgba(0,0,0,0.18)'
+                                  }} title={token.type}>
+                                    {getMaterialIcon(token.type)}
+                                  </Box>
+                                ))}
+                              </Box>
+                            )}
+                          </>
+                        )}
+                      </Paper>
                     );
                   })}
                 </Box>
               </Box>
               {/* Token Pool */}
               <Box sx={{ width: '100%', minHeight: 60, background: '#f8f8ff', borderRadius: 1, p: 1 }}>
-                <Typography variant="caption" color="text.secondary">Tokens</Typography>
                 <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1, justifyContent: 'center' }}>
-                  {player.tokens.map((token, idx) => (
-                    <IconButton
-                      key={idx}
-                      sx={{
-                        width: 40,
-                        height: 40,
-                        borderRadius: '50%',
-                        backgroundColor: token.count > 0 ? cardInterestData.color : '#ccc',
-                        color: 'white',
-                        cursor: token.count > 0 ? 'pointer' : 'default',
-                        transform: selectedToken && selectedToken.type === token.type ? 'scale(1.15)' : 'scale(1)',
-                        boxShadow: selectedToken && selectedToken.type === token.type ? '0 0 0 3px #3d91ff, 0 5px 10px rgba(0,0,0,0.4)' : '0 1px 3px rgba(0,0,0,0.2)',
-                        transition: 'transform 0.2s, box-shadow 0.2s',
-                        '&:hover': {
-                          transform: token.count > 0 ? 'scale(1.1)' : 'scale(1)'
-                        }
-                      }}
-                      onClick={i === currentIdx && isTokenPhase ? () => handleSelectToken(token.type) : undefined}
-                      disabled={token.count === 0}
-                      title={token.tooltip}
-                    >
-                      {getMaterialIcon(token.type)}
-                    </IconButton>
-                  ))}
+                  {player.tokens.map((token, idx) => {
+                    const isSelectable = i === currentIdx && isTokenPhase && token.count > 0;
+                    return (
+                      <Box
+                        key={idx}
+                        sx={{
+                          width: 40,
+                          height: 40,
+                          borderRadius: '50%',
+                          backgroundColor: token.count > 0 ? cardInterestData.color : '#ccc',
+                          color: 'white',
+                          cursor: isSelectable ? 'pointer' : 'default',
+                          transform: selectedToken && selectedToken.type === token.type ? 'scale(1.15)' : 'scale(1)',
+                          boxShadow: selectedToken && selectedToken.type === token.type ? '0 0 0 3px #3d91ff, 0 5px 10px rgba(0,0,0,0.4)' : '0 1px 3px rgba(0,0,0,0.2)',
+                          transition: 'all 0.15s',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: 22,
+                          '&:hover': isSelectable ? { transform: 'scale(1.05)', filter: 'brightness(0.93)' } : {}
+                        }}
+                        onClick={isSelectable ? () => handleSelectToken(token.type) : undefined}
+                        title={token.tooltip}
+                      >
+                        {getMaterialIcon(token.type)}
+                      </Box>
+                    );
+                  })}
                 </Box>
               </Box>
             </Paper>
@@ -949,7 +1028,7 @@ export default function GameBoard({ setup }) {
         </DialogContent>
         <DialogActions>
           {modalContent?.actions?.map((action, index) => (
-            <Button key={index} onClick={action.action} variant="contained">
+            <Button key={index} onClick={action.action} variant="contained" color="primary" sx={{ borderRadius: 2, transition: 'all 0.15s', '&:hover': { transform: 'scale(1.05)', filter: 'brightness(0.93)' } }}>
               {action.text}
             </Button>
           ))}
