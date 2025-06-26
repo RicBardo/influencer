@@ -139,6 +139,12 @@ function getMaterialIcon(tokenType) {
   }
 }
 
+// Token order for consistent display
+const TOKEN_ORDER = ['like', 'dislike', 'share', 'report', 'follow', 'ban'];
+function sortTokens(tokens) {
+  return [...tokens].sort((a, b) => TOKEN_ORDER.indexOf(a.type) - TOKEN_ORDER.indexOf(b.type));
+}
+
 export default function GameBoard({ setup }) {
   const [deck, setDeck] = useState([]);
   const [discard, setDiscard] = useState([]);
@@ -207,47 +213,54 @@ export default function GameBoard({ setup }) {
       }
     }
 
+    // Score your own wall
     players.forEach(player => {
       player.wall.forEach(card => {
-        let cardValue = card.value;
+        // If card has a Report token, it scores 0
+        if (card.tokens && card.tokens.some(token => token.type === 'report')) return;
+        let cardValue = card.calculatedValue !== undefined ? card.calculatedValue : card.value;
         let tokenPoints = 0;
-        let reportTokenPresent = false;
-
         if (card.tokens) {
           card.tokens.forEach(token => {
             if (token.type === 'like') tokenPoints += 1;
             else if (token.type === 'dislike') tokenPoints -= 1;
-            else if (token.type === 'report') reportTokenPresent = true;
           });
         }
-
-        if (reportTokenPresent) {
-          log += `Card ${card.interest} on ${player.name}'s wall is reported, nullifying its points.\n`;
-          return; // Skip this card entirely
-        }
-
         const totalCardValue = cardValue + tokenPoints;
-
-        // Score for the owner of the wall
         if (player === currentPlayer) {
-          if (activeInterests.has(card.interest)) {
+          if (card.turnPosted) {
+            score += totalCardValue;
+            log += `Your new card ${card.interest} scored ${totalCardValue} points (played this turn).\n`;
+            card.turnPosted = false;
+          } else if (activeInterests.has(card.interest)) {
             score += totalCardValue;
             log += `Your card ${card.interest} scored ${totalCardValue} points (active interest).\n`;
-          } else if (card.turnPosted) {
-            score += totalCardValue;
-            log += `Your new card ${card.interest} scored ${totalCardValue} points (one time).\n`;
-            card.turnPosted = false;
           }
         }
+      });
+    });
 
-        // Score for share tokens from the current player
-        if (card.tokens) {
-          card.tokens.forEach(token => {
-            if (token.type === 'share' && token.player === currentPlayer) {
-              score += totalCardValue;
-              log += `Your share token on ${player.name}'s card ${card.interest} scored ${totalCardValue} points.\n`;
+    // Score for Share tokens you have placed on other players' cards
+    players.forEach(player => {
+      if (player === currentPlayer) return;
+      player.wall.forEach(card => {
+        // If card has a Report token, it scores 0
+        if (card.tokens && card.tokens.some(token => token.type === 'report')) return;
+        if (card.tokens && card.tokens.some(token => token.type === 'share' && token.player && token.player.name === currentPlayer.name)) {
+          // Only count if card matches your interest
+          if (activeInterests.has(card.interest)) {
+            let cardValue = card.calculatedValue !== undefined ? card.calculatedValue : card.value;
+            let tokenPoints = 0;
+            if (card.tokens) {
+              card.tokens.forEach(token => {
+                if (token.type === 'like') tokenPoints += 1;
+                else if (token.type === 'dislike') tokenPoints -= 1;
+              });
             }
-          });
+            const totalCardValue = cardValue + tokenPoints;
+            score += totalCardValue;
+            log += `Your share token on ${player.name}'s card ${card.interest} scored ${totalCardValue} points.\n`;
+          }
         }
       });
     });
@@ -297,14 +310,34 @@ export default function GameBoard({ setup }) {
       return;
     }
 
+    const newPlayers = [...players];
     const newHand = currentPlayer.hand.filter((_, i) => i !== idx);
-    let newWall = [...currentPlayer.wall, card];
+    let newWall = [{ ...card, turnPosted: true }, ...currentPlayer.wall];
     let newDiscard = [...discard];
     if (newWall.length > 3) {
-      newDiscard.push(newWall[0]);
-      newWall = newWall.slice(1);
+      // Remove oldest card (last in array)
+      let removedCard = newWall[newWall.length - 1];
+      // Return tokens to owners
+      if (removedCard.tokens && removedCard.tokens.length > 0) {
+        removedCard.tokens.forEach(token => {
+          const ownerIdx = newPlayers.findIndex(p => p.name === token.player.name);
+          if (ownerIdx !== -1) {
+            let ownerTokens = [...newPlayers[ownerIdx].tokens];
+            const tokenIdx = ownerTokens.findIndex(t => t.type === token.type);
+            if (tokenIdx !== -1) {
+              ownerTokens[tokenIdx] = { ...ownerTokens[tokenIdx], count: ownerTokens[tokenIdx].count + 1 };
+            } else {
+              ownerTokens.push({ type: token.type, count: 1, playerId: ownerIdx });
+            }
+            newPlayers[ownerIdx].tokens = sortTokens(ownerTokens);
+          }
+        });
+      }
+      // Remove tokens from card before discarding
+      removedCard = { ...removedCard, tokens: [] };
+      newDiscard.push(removedCard);
+      newWall = newWall.slice(0, 3); // Keep only the 3 newest cards
     }
-    const newPlayers = [...players];
     newPlayers[currentIdx] = {
       ...currentPlayer,
       hand: newHand,
@@ -343,24 +376,13 @@ export default function GameBoard({ setup }) {
     newPlayers[playerIdx].wall[cardIdx] = targetCard;
     
     // Remove token from current player
-    let newTokens = newPlayers[currentIdx].tokens.map(t => {
+    let newTokens = sortTokens(newPlayers[currentIdx].tokens.map(t => {
       if (t.type === selectedToken.type) {
         return { ...t, count: t.count - 1 };
       }
       return t;
-    }).filter(t => t.count > 0);
+    }).filter(t => t.count > 0));
     newPlayers[currentIdx].tokens = newTokens;
-    
-    // Special effects
-    if (selectedToken.type === 'share') {
-      // Add a copy of the card to the current player's wall
-      const sharedCard = { ...targetCard, tokens: [] };
-      newPlayers[currentIdx].wall = [...newPlayers[currentIdx].wall, sharedCard];
-    } else if (selectedToken.type === 'report') {
-      // Set the card's value to 0
-      targetCard.value = 0;
-      newPlayers[playerIdx].wall[cardIdx] = targetCard;
-    }
     
     setPlayers(newPlayers);
     setSelectedToken(null);
@@ -372,15 +394,7 @@ export default function GameBoard({ setup }) {
     if (!isProfileValidTarget(playerIdx)) return;
     
     const newPlayers = [...players];
-    let newTokens = newPlayers[currentIdx].tokens.map(t => {
-      if (t.type === selectedToken.type) {
-        return { ...t, count: t.count - 1 };
-      }
-      return t;
-    }).filter(t => t.count > 0);
-    newPlayers[currentIdx].tokens = newTokens;
     
-    const tokenToPlay = newPlayers[currentIdx].tokens.find(t => t.type === selectedToken.type);
     if (selectedToken.type === 'follow') {
       // If player is already following someone, just update the link.
       if (newPlayers[currentIdx].isFollowing) {
@@ -393,26 +407,41 @@ export default function GameBoard({ setup }) {
       if (!newPlayers[playerIdx].followers) newPlayers[playerIdx].followers = [];
       newPlayers[playerIdx].followers.push(newPlayers[currentIdx]);
     } else if (selectedToken.type === 'ban') {
-      // Remove all tokens of the banned player
-      newPlayers.forEach(player => {
-        player.wall.forEach(card => {
-          if (card.tokens) {
-            card.tokens = card.tokens.filter(token => token.player !== newPlayers[playerIdx]);
+      const bannedPlayer = newPlayers[playerIdx];
+      let removedTokens = [];
+      // Remove all tokens of the banned player from all cards on all walls
+      newPlayers.forEach(p => {
+        p.wall.forEach(card => {
+          if (card.tokens && card.tokens.length > 0) {
+            const toRemove = card.tokens.filter(token => token.player && token.player.name === bannedPlayer.name);
+            removedTokens.push(...toRemove);
+            card.tokens = card.tokens.filter(token => !(token.player && token.player.name === bannedPlayer.name));
           }
         });
       });
-      // Remove follow tokens
-      newPlayers.forEach(player => {
-        if (player.isFollowing === newPlayers[playerIdx]) {
-          player.isFollowing = null;
-        }
-        if (player.followers) {
-          player.followers = player.followers.filter(p => p !== newPlayers[playerIdx]);
+      // Remove Follow token (if banned player is following someone)
+      if (bannedPlayer.isFollowing) {
+        removedTokens.push({ type: 'follow', player: bannedPlayer });
+        bannedPlayer.isFollowing = null;
+      }
+      // Remove banned player from any followers arrays
+      newPlayers.forEach(p => {
+        if (p.followers) {
+          p.followers = p.followers.filter(f => f.name !== bannedPlayer.name);
         }
       });
-      // Add ban token to dump
-      setTokensDump([...tokensDump, { type: 'ban', player: newPlayers[currentIdx] }]);
+      // Add all removed tokens and the Ban token itself to the dump
+      setTokensDump([...tokensDump, ...removedTokens, { type: 'ban', player: newPlayers[currentIdx] }]);
     }
+    
+    // Remove token from current player after applying effects
+    let newTokens2 = sortTokens(newPlayers[currentIdx].tokens.map(t => {
+      if (t.type === selectedToken.type) {
+        return { ...t, count: t.count - 1 };
+      }
+      return t;
+    }).filter(t => t.count > 0));
+    newPlayers[currentIdx].tokens = newTokens2;
     
     setPlayers(newPlayers);
     setSelectedToken(null);
@@ -550,6 +579,7 @@ export default function GameBoard({ setup }) {
     const newPlayers = [...players];
     const token = newPlayers[currentIdx].tokens.find(t => t.type === tokenType);
     if (token) token.count += 1;
+    newPlayers[currentIdx].tokens = sortTokens(newPlayers[currentIdx].tokens);
     setPlayers(newPlayers);
     setModalOpen(false);
   };
@@ -561,17 +591,21 @@ export default function GameBoard({ setup }) {
 
   const isCardValidTarget = (targetPlayer, card) => {
     if (!isTokenPhase || !selectedToken) return false;
-    // Only allow one of each token per card per player
-    if (card.tokens) {
-      const hasSameToken = card.tokens.some(token => token.type === selectedToken.type && token.player === currentPlayer);
-      if (hasSameToken) return false;
-    }
-    // Like/Dislike: any card
+    // Like/Dislike: any content card (on any wall, including your own)
     if (selectedToken.type === 'like' || selectedToken.type === 'dislike') {
       return true;
     }
-    // Share/Report: only on other players' cards
-    if ((selectedToken.type === 'share' || selectedToken.type === 'report') && targetPlayer !== currentPlayer) {
+    // Share: only on other players' cards, and only if card matches your innate or acquired interest
+    if (selectedToken.type === 'share' && targetPlayer !== currentPlayer) {
+      const interests = [currentPlayer.interest];
+      if (currentPlayer.isFollowing) interests.push(currentPlayer.isFollowing.interest);
+      if (interests.includes(card.interest)) {
+        return true;
+      }
+      return false;
+    }
+    // Report: only on other players' cards
+    if (selectedToken.type === 'report' && targetPlayer !== currentPlayer) {
       return true;
     }
     return false;
@@ -583,18 +617,19 @@ export default function GameBoard({ setup }) {
     const targetPlayer = players[targetPlayerIndex];
     if (targetPlayer === currentPlayer) return false;
     
+    // Only Follow and Ban tokens can be placed on profiles
+    if (selectedToken.type !== 'follow' && selectedToken.type !== 'ban') {
+      return false;
+    }
+    
     // For follow tokens, check if already following someone
     if (selectedToken.type === 'follow' && currentPlayer.isFollowing) return false;
     
     // For ban tokens, check if already has a ban token on them
     if (selectedToken.type === 'ban') {
-      // Check if there's already a ban token on this player
-      const hasBanToken = players.some(p => 
-        p.wall.some(card => 
-          card.tokens && card.tokens.some(token => 
-            token.type === 'ban' && token.player === targetPlayer
-          )
-        )
+      // Check if there's already a ban token on this player in the dump
+      const hasBanToken = tokensDump.some(token => 
+        token.type === 'ban' && token.player === targetPlayer
       );
       if (hasBanToken) return false;
     }
@@ -667,8 +702,7 @@ export default function GameBoard({ setup }) {
       overflowX: 'auto',
       px: 5,
       alignItems: 'flex-start',
-      boxSizing: 'border-box',
-      mt: 2
+      boxSizing: 'border-box'
     }}>
       {players.map((player, i) => {
         const isCurrentPlayer = i === currentIdx;
@@ -746,6 +780,7 @@ export default function GameBoard({ setup }) {
               border: `3px solid ${playerColor}`,
               borderRadius: 2,
               p: 2,
+              pt: 0,
               width: '100%',
               background: '#fff',
               boxShadow: isCurrentPlayer ? `0 0 20px 8px ${playerColor}40` : undefined,
@@ -768,7 +803,7 @@ export default function GameBoard({ setup }) {
                     width: 40,
                     height: 40,
                     borderRadius: '50%',
-                    backgroundColor: interestColors[follower.interest],
+                    backgroundColor: getInterestData(follower.interest).color,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -782,8 +817,9 @@ export default function GameBoard({ setup }) {
               <Box sx={{
                 width: '100%',
                 display: 'flex',
-                justifyContent: 'space-between',
+                flexDirection: 'row',
                 alignItems: 'center',
+                justifyContent: 'space-between',
                 p: 1,
                 borderRadius: 1,
                 background: isTokenPhase && isProfileValidTarget(i) ? '#f3eaff' : undefined,
@@ -794,18 +830,21 @@ export default function GameBoard({ setup }) {
               }}
                 onClick={isTokenPhase && isProfileValidTarget(i) ? () => handlePlaceTokenOnProfile(i) : undefined}
               >
-                <Box sx={{ display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                <Box sx={{ width: '100%', height: 60, display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
                   <Typography fontWeight={700}>{player.name}</Typography>
-                  <Box sx={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 1 }}>
-                    <span style={{ fontSize: 22 }}>{cardInterestData.icon}</span>
-                    <Typography>{player.interest ? player.interest.charAt(0).toUpperCase() + player.interest.slice(1) : ''}</Typography>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <span style={{ fontSize: 22 }}>{cardInterestData.icon}</span>
+                      <Typography>{player.interest ? player.interest.charAt(0).toUpperCase() + player.interest.slice(1) : ''}</Typography>
+                    </Box>
+                    {player.isFollowing && (
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0, mt: 0 }}>
+                        <span style={{ fontSize: 16 }}>{getInterestData(player.isFollowing.interest).icon}</span>
+                        <span style={{ fontSize: 13, color: '#666' }}>{player.isFollowing.interest.charAt(0).toUpperCase() + player.isFollowing.interest.slice(1)}</span>
+                      </Box>
+                    )}
                   </Box>
                 </Box>
-                {player.isFollowing && (
-                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                    Following {player.isFollowing.name}
-                  </Typography>
-                )}
               </Box>
               <Box sx={{ width: '100%', height: 18, background: '#eee', borderRadius: 1, mb: 1, position: 'relative' }}>
                 <LinearProgress variant="determinate" value={Math.min(100, (player.position / BOARD_SIZE) * 100)} sx={{ height: 18, borderRadius: 1, background: '#eee', '& .MuiLinearProgress-bar': { background: playerColor } }} />
@@ -914,8 +953,6 @@ export default function GameBoard({ setup }) {
                         position: 'relative',
                         overflow: 'visible',
                         boxShadow: isPlayable ? '0 0 8px 2px #9147ff40' : undefined,
-                        outline: isTokenPhase && isCardValidTarget(player, card) ? '2px solid #4cff8d' : undefined,
-                        zIndex: isTokenPhase && isCardValidTarget(player, card) ? 3 : 1,
                         transition: 'all 0.15s',
                         '&:hover': isPlayable ? { transform: 'scale(1.05)', filter: 'brightness(0.93)' } : {}
                       }} onClick={isPlayable ? () => handlePlayCard(idx) : undefined}>
@@ -969,10 +1006,12 @@ export default function GameBoard({ setup }) {
                 </Box>
               </Box>
               {/* Token Pool */}
-              <Box sx={{ width: '100%', minHeight: 60, background: '#f8f8ff', borderRadius: 1, p: 1 }}>
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1, justifyContent: 'center' }}>
-                  {player.tokens.map((token, idx) => {
+              <Box sx={{ width: '100%', minHeight: 40, background: '#f8f8ff', borderRadius: 1, p: 1, px: 2, boxSizing: 'border-box' }}>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 0.5, justifyContent: 'center' }}>
+                  {sortTokens(player.tokens).map((token, idx) => {
                     const isSelectable = i === currentIdx && isTokenPhase && token.count > 0;
+                    // Only highlight as selected if this is the current player
+                    const isSelected = i === currentIdx && selectedToken && selectedToken.type === token.type;
                     return (
                       <Box
                         key={idx}
@@ -983,8 +1022,8 @@ export default function GameBoard({ setup }) {
                           backgroundColor: token.count > 0 ? cardInterestData.color : '#ccc',
                           color: 'white',
                           cursor: isSelectable ? 'pointer' : 'default',
-                          transform: selectedToken && selectedToken.type === token.type ? 'scale(1.15)' : 'scale(1)',
-                          boxShadow: selectedToken && selectedToken.type === token.type ? '0 0 0 3px #3d91ff, 0 5px 10px rgba(0,0,0,0.4)' : '0 1px 3px rgba(0,0,0,0.2)',
+                          transform: isSelected ? 'scale(1.15)' : 'scale(1)',
+                          boxShadow: isSelected ? '0 0 0 3px #3d91ff, 0 5px 10px rgba(0,0,0,0.4)' : '0 1px 3px rgba(0,0,0,0.2)',
                           transition: 'all 0.15s',
                           display: 'flex',
                           alignItems: 'center',
