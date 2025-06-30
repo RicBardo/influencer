@@ -94,18 +94,18 @@ function createDeck(players, networkCardsEnabled) {
     for (let i = 0; i < 3; i++) newDeck.push({ interest, value: 2 });
     newDeck.push({ interest, value: 3 });
   });
-  // Add 10 SHIT STORM Network Cards if enabled (for focused testing)
+  // Add 10 SPONSORED POST Network Cards if enabled (for focused testing)
   if (networkCardsEnabled) {
     for (let i = 0; i < 10; i++) {
       newDeck.push({
-        title: 'SHIT STORM',
-        description: 'All influencers but you lose 3 Pp.',
-        effectKey: 'shitstorm',
-        type: 'network',
+        title: 'SPONSORED POST',
+        description: 'You gain as many Pp as the number of posts of your interest in play.',
+        effectKey: 'sponsored',
+        type: 'network'
       });
     }
   }
-  return shuffleDeck(newDeck);
+  return newDeck;
 }
 
 function shuffleDeck(deck) {
@@ -509,26 +509,36 @@ export default function GameBoard({ setup }) {
             p.scoreGainedThisTurn = -lost; // Show -3 (or -2/-1 if near zero)
           }
         });
-        // No modal or popup, just enable token phase and End Turn
+        // No modal or popup
         setPlayers(newPlayers);
         setDeck(newDeck);
         setDiscard(newDiscard);
         setTokensDump(newTokensDump);
         setIsTokenPhase(true); // Allow token phase after playing
         setSelectedToken(null);
-        return; // Do not set modalContent or modalOpen
+        return;
       }
       case 'sponsored': {
-        // Current player gains PP equal to number of posts of their interest on all walls
-        let count = 0;
-        newPlayers.forEach(p => {
-          p.wall.forEach(card => {
-            if (card.interest === currentPlayer.interest) count++;
-          });
-        });
-        const before = newPlayers[currentIdx].position;
-        newPlayers[currentIdx].position = Math.min(BOARD_SIZE, newPlayers[currentIdx].position + count);
-        effectText = `SPONSORED POST:\nYou gain as many Pp as the number of posts of your interest in play.\n\nEffect: +${count} Pp (${before} → ${newPlayers[currentIdx].position})`;
+        // Count posts of player's interest on all walls
+        const playerInterest = currentPlayer.interest;
+        const postsCount = players.reduce((count, player) => {
+          return count + player.wall.filter(card => card.interest === playerInterest).length;
+        }, 0);
+
+        // Add points immediately and show +N indicator
+        const newPlayers = [...players];
+        newPlayers[currentIdx] = {
+          ...currentPlayer,
+          position: currentPlayer.position + postsCount,
+          scoreGainedThisTurn: postsCount
+        };
+
+        // Update state to enable token phase and end turn
+        setPlayers(newPlayers);
+        setDeck(newDeck);
+        setDiscard(newDiscard);
+        setTokensDump(newTokensDump);
+        setIsTokenPhase(true);
         break;
       }
       case 'stalker': {
@@ -866,7 +876,7 @@ export default function GameBoard({ setup }) {
                 <Typography sx={{ position: 'absolute', left: 8, top: 0, fontSize: 12, color: '#333' }}>{player.position} / {BOARD_SIZE}</Typography>
                 {player.scoreGainedThisTurn && (
                   <Typography sx={{ position: 'absolute', right: 8, top: 0, fontSize: 12, color: playerColor, fontWeight: 'bold' }}>
-                    {player.scoreGainedThisTurn}
+                    {player.scoreGainedThisTurn < 0 ? `-${Math.abs(player.scoreGainedThisTurn)}` : `+${player.scoreGainedThisTurn}`}
                   </Typography>
                 )}
               </Box>
