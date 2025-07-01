@@ -94,13 +94,13 @@ function createDeck(players, networkCardsEnabled) {
     for (let i = 0; i < 3; i++) newDeck.push({ interest, value: 2 });
     newDeck.push({ interest, value: 3 });
   });
-  // Add 10 SHIT STORM Network Cards if enabled (for focused testing)
+  // Add 10 SOCIAL CHALLENGE Network Cards if enabled (for focused testing)
   if (networkCardsEnabled) {
     for (let i = 0; i < 10; i++) {
       newDeck.push({
-        title: 'SHIT STORM',
-        description: 'All influencers but you lose 3 Pp.',
-        effectKey: 'shitstorm',
+        title: 'SOCIAL CHALLENGE',
+        description: 'Reveal a post from your hand and gain 2 Pp. All players with a card of the same interest also get 2 Pp. Others lose 2 Pp.',
+        effectKey: 'challenge',
         type: 'network',
       });
     }
@@ -166,6 +166,8 @@ export default function GameBoard({ setup }) {
   const [scoreLog, setScoreLog] = useState('');
   const [gameEnded, setGameEnded] = useState(false);
   const [winner, setWinner] = useState(null);
+  const [socialChallengeState, setSocialChallengeState] = useState(null);
+  const [hasPlayedCardThisTurn, setHasPlayedCardThisTurn] = useState(false);
 
   useEffect(() => {
     if (!setup) return;
@@ -201,10 +203,35 @@ export default function GameBoard({ setup }) {
     setScoreLog('');
     setGameEnded(false);
     setWinner(null);
+    setHasPlayedCardThisTurn(false);
   }, [setup]);
 
   if (!setup || players.length === 0) return null;
   const currentPlayer = players[currentIdx];
+
+  // Utility to set scoreGainedThisTurn and clear it after 3 seconds
+  const setScoreGainedForPlayer = (playerIdx, value) => {
+    setPlayers(prevPlayers => {
+      const newPlayers = [...prevPlayers];
+      newPlayers[playerIdx] = {
+        ...newPlayers[playerIdx],
+        scoreGainedThisTurn: value
+      };
+      return newPlayers;
+    });
+    setTimeout(() => {
+      setPlayers(prevPlayers => {
+        const newPlayers = [...prevPlayers];
+        if (newPlayers[playerIdx].scoreGainedThisTurn === value) {
+          newPlayers[playerIdx] = {
+            ...newPlayers[playerIdx],
+            scoreGainedThisTurn: undefined
+          };
+        }
+        return newPlayers;
+      });
+    }, 3000);
+  };
 
   // Calculate score function
   const calculateScore = () => {
@@ -301,21 +328,18 @@ export default function GameBoard({ setup }) {
 
   // Play card logic (from hand to wall)
   const handlePlayCard = idx => {
-    if (mustDraw || isTokenPhase) return;
+    const isSocialChallengeBlocking = socialChallengeState && (
+      (socialChallengeState.phase === 'select-own' && currentIdx !== yourPlayerIndex) ||
+      (socialChallengeState.phase === 'select-others')
+    );
+    if (mustDraw || isTokenPhase || hasPlayedCardThisTurn || isSocialChallengeBlocking) return;
     const card = currentPlayer.hand[idx];
     
     // Check if it's a network card
     if (card.type === 'network') {
-      applyNetworkCardEffect(card);
-      // Remove network card from hand and add to discard pile
-      const newPlayers = [...players];
-      const newDiscard = [...discard, card];
-      newPlayers[currentIdx] = {
-        ...currentPlayer,
-        hand: currentPlayer.hand.filter((_, i) => i !== idx)
-      };
-      setPlayers(newPlayers);
-      setDiscard(newDiscard);
+      applyNetworkCardEffect(card, idx);
+      setMustDraw(false); // Do not allow drawing again this turn
+      setHasPlayedCardThisTurn(true);
       return;
     }
 
@@ -356,6 +380,8 @@ export default function GameBoard({ setup }) {
     setDiscard(newDiscard);
     setIsTokenPhase(true);
     setSelectedToken(null);
+    setHasPlayedCardThisTurn(true);
+    setMustDraw(false);
   };
 
   // Token selection
@@ -469,6 +495,18 @@ export default function GameBoard({ setup }) {
 
     if (score > 0) {
       newPlayers[lastPlayerIndex].scoreGainedThisTurn = score;
+      setTimeout(() => {
+        setPlayers(prevPlayers => {
+          const updated = [...prevPlayers];
+          if (updated[lastPlayerIndex].scoreGainedThisTurn === score) {
+            updated[lastPlayerIndex] = {
+              ...updated[lastPlayerIndex],
+              scoreGainedThisTurn: undefined
+            };
+          }
+          return updated;
+        });
+      }, 3000);
     }
 
     newPlayers[lastPlayerIndex].position = Math.min(BOARD_SIZE, newPlayers[lastPlayerIndex].position + score);
@@ -488,10 +526,11 @@ export default function GameBoard({ setup }) {
     setMustDraw(true);
     setSelectedToken(null);
     setIsTokenPhase(false);
+    setHasPlayedCardThisTurn(false);
   };
 
   // Network card effects
-  const applyNetworkCardEffect = (card) => {
+  const applyNetworkCardEffect = (card, handIdx) => {
     let effectText = '';
     let newPlayers = [...players];
     let newDeck = [...deck];
@@ -506,30 +545,54 @@ export default function GameBoard({ setup }) {
             const before = p.position;
             const lost = Math.min(3, p.position);
             p.position = Math.max(0, p.position - 3);
-            p.scoreGainedThisTurn = -lost; // Show -3 (or -2/-1 if near zero)
+            setScoreGainedForPlayer(i, -lost);
           }
         });
-        // No modal or popup, just enable token phase and End Turn
+        // Remove network card from hand and add to discard pile
+        newDiscard.push(card);
+        newPlayers[currentIdx] = {
+          ...newPlayers[currentIdx],
+          hand: newPlayers[currentIdx].hand.filter((_, i) => i !== handIdx)
+        };
         setPlayers(newPlayers);
         setDeck(newDeck);
         setDiscard(newDiscard);
         setTokensDump(newTokensDump);
-        setIsTokenPhase(true); // Allow token phase after playing
+        setIsTokenPhase(true);
         setSelectedToken(null);
-        return; // Do not set modalContent or modalOpen
+        setHasPlayedCardThisTurn(true);
+        return;
       }
       case 'sponsored': {
-        // Current player gains PP equal to number of posts of their interest on all walls
-        let count = 0;
-        newPlayers.forEach(p => {
-          p.wall.forEach(card => {
-            if (card.interest === currentPlayer.interest) count++;
-          });
-        });
-        const before = newPlayers[currentIdx].position;
-        newPlayers[currentIdx].position = Math.min(BOARD_SIZE, newPlayers[currentIdx].position + count);
-        effectText = `SPONSORED POST:\nYou gain as many Pp as the number of posts of your interest in play.\n\nEffect: +${count} Pp (${before} → ${newPlayers[currentIdx].position})`;
-        break;
+        // Count posts of player's interest on all walls
+        const playerInterest = players[currentIdx].interest;
+        const postsCount = players.reduce((count, player) => {
+          return count + player.wall.filter(card => card.interest === playerInterest).length;
+        }, 0);
+
+        // Add points immediately and show +N indicator
+        const newPlayers = [...players];
+        newPlayers[currentIdx] = {
+          ...newPlayers[currentIdx],
+          position: newPlayers[currentIdx].position + postsCount,
+          scoreGainedThisTurn: postsCount
+        };
+
+        // Remove network card from hand and add to discard pile
+        newDiscard.push(card);
+        newPlayers[currentIdx] = {
+          ...newPlayers[currentIdx],
+          hand: newPlayers[currentIdx].hand.filter((_, i) => i !== handIdx)
+        };
+        setPlayers(newPlayers);
+        setDeck(newDeck);
+        setDiscard(newDiscard);
+        setTokensDump(newTokensDump);
+        setIsTokenPhase(true);
+        setSelectedToken(null);
+        setScoreGainedForPlayer(currentIdx, postsCount);
+        setHasPlayedCardThisTurn(true);
+        return;
       }
       case 'stalker': {
         // Gain 3 Like tokens
@@ -571,6 +634,26 @@ export default function GameBoard({ setup }) {
         setModalOpen(true);
         return;
       }
+      case 'challenge': {
+        // Remove network card from hand and add to discard pile
+        const newPlayers = [...players];
+        const newDiscard = [...discard, card];
+        newPlayers[currentIdx] = {
+          ...newPlayers[currentIdx],
+          hand: newPlayers[currentIdx].hand.filter((_, i) => i !== handIdx)
+        };
+        setPlayers(newPlayers);
+        setDiscard(newDiscard);
+        // Set state to highlight content cards and disable network cards in hand
+        setSocialChallengeState({
+          phase: 'reveal', // new phase name for this effect
+          revealedInterest: null,
+          revealedIdx: null
+        });
+        setIsTokenPhase(false); // Block token phase until challenge is resolved
+        setHasPlayedCardThisTurn(true); // Prevent playing another card
+        return;
+      }
       default:
         effectText = 'Unknown Network Card effect.';
     }
@@ -588,6 +671,7 @@ export default function GameBoard({ setup }) {
       });
       setModalOpen(true);
     }
+    setHasPlayedCardThisTurn(true);
   };
 
   const addTokenToPlayer = (tokenType) => {
@@ -650,6 +734,48 @@ export default function GameBoard({ setup }) {
     }
     
     return true;
+  };
+
+  // Add a handler for when a content card is clicked during SOCIAL CHALLENGE
+  const handleSocialChallengeReveal = (idx) => {
+    const card = players[currentIdx].hand[idx];
+    const revealedInterest = card.interest;
+    // Award points
+    const newPlayers = [...players];
+    // Current player always gets +2
+    newPlayers[currentIdx].position += 2;
+    newPlayers[currentIdx].scoreGainedThisTurn = 2;
+    // Other players
+    players.forEach((p, i) => {
+      if (i === currentIdx) return;
+      const hasMatch = p.hand.some(c => c.interest === revealedInterest);
+      if (hasMatch) {
+        newPlayers[i].position += 2;
+        newPlayers[i].scoreGainedThisTurn = 2;
+      } else {
+        const lost = Math.min(2, newPlayers[i].position);
+        newPlayers[i].position = Math.max(0, newPlayers[i].position - 2);
+        newPlayers[i].scoreGainedThisTurn = -lost;
+      }
+    });
+    setPlayers(newPlayers);
+    // Clear scoreGainedThisTurn after 3 seconds for all affected players
+    newPlayers.forEach((p, i) => {
+      if (typeof p.scoreGainedThisTurn !== 'undefined') {
+        setTimeout(() => {
+          setPlayers(prevPlayers => {
+            const updated = [...prevPlayers];
+            if (updated[i].scoreGainedThisTurn === p.scoreGainedThisTurn) {
+              updated[i] = { ...updated[i], scoreGainedThisTurn: undefined };
+            }
+            return updated;
+          });
+        }, 3000);
+      }
+    });
+    // End challenge state, show End Turn button and enter token phase
+    setSocialChallengeState(null);
+    setIsTokenPhase(true);
   };
 
   // Game end screen
@@ -724,6 +850,21 @@ export default function GameBoard({ setup }) {
         const followers = players.filter(p => p.isFollowing && p.isFollowing.name === player.name);
         const cardInterestData = getInterestData(player.interest);
         const playerColor = cardInterestData.color;
+        const isSocialChallengeSelectOwn = socialChallengeState && socialChallengeState.phase === 'select-own' && i === currentIdx;
+        const isSelected = isSocialChallengeSelectOwn && socialChallengeState.revealedIdx === i;
+        const isHighlight = isSocialChallengeSelectOwn && socialChallengeState.revealedIdx === null;
+        const isSocialChallengeSelectOthers = socialChallengeState && socialChallengeState.phase === 'select-others' && i === socialChallengeState.pending[0];
+        const isMatching = isSocialChallengeSelectOthers && player.hand[socialChallengeState.revealedIdx] && player.hand[socialChallengeState.revealedIdx].interest === socialChallengeState.revealedInterest;
+        const isOtherSelected = isSocialChallengeSelectOthers && socialChallengeState.selections && socialChallengeState.selections[i] === socialChallengeState.revealedIdx;
+        const isSocialChallengeBlocking = socialChallengeState && (
+          (socialChallengeState.phase === 'select-own' && i === currentIdx)
+        );
+        const isPlayable = i === currentIdx && !mustDraw && !isTokenPhase && !hasPlayedCardThisTurn && !isSocialChallengeBlocking;
+        const isSocialChallengeReveal = socialChallengeState && socialChallengeState.phase === 'reveal' && i === currentIdx;
+        const isCC = !player.hand[i].type || player.hand[i].type !== 'network';
+        const isNC = player.hand[i].type === 'network';
+        const highlightCC = isSocialChallengeReveal && isCC;
+        const disableNC = isSocialChallengeReveal && isNC;
         return (
           <Box key={i} sx={{
             display: 'flex',
@@ -745,51 +886,53 @@ export default function GameBoard({ setup }) {
               minHeight: 64,
               mb: 0
             }}>
-              {isCurrentPlayer && (
-                mustDraw ? (
-                  <Button
-                    variant="contained"
-                    sx={{
-                      minWidth: 120,
-                      borderRadius: 2,
-                      backgroundColor: playerColor,
-                      color: '#fff',
-                      transition: 'all 0.15s',
-                      '&:hover': {
-                        transform: 'scale(1.05)',
-                        filter: 'brightness(0.93)',
-                        backgroundColor: playerColor
-                      }
-                    }}
-                    onClick={handleDrawCard}
-                  >
-                    Draw Card
-                  </Button>
-                ) : isTokenPhase ? (
-                  <Button
-                    variant="contained"
-                    sx={{
-                      minWidth: 120,
-                      borderRadius: 2,
-                      backgroundColor: playerColor,
-                      color: '#fff',
-                      transition: 'all 0.15s',
-                      '&:hover': {
-                        transform: 'scale(1.05)',
-                        filter: 'brightness(0.93)',
-                        backgroundColor: playerColor
-                      }
-                    }}
-                    onClick={handleEndTurn}
-                  >
-                    End Turn
-                  </Button>
-                ) : (
-                  <Typography variant="body2" sx={{ color: 'white', textAlign: 'center', fontSize: '0.95rem' }}>
-                    Play a card
-                  </Typography>
-                )
-              )}
+              {isCurrentPlayer && socialChallengeState && socialChallengeState.phase === 'reveal' ? (
+                <Typography variant="body2" sx={{ color: 'white', textAlign: 'center', fontSize: '0.95rem' }}>
+                  Reveal card
+                </Typography>
+              ) : isCurrentPlayer && mustDraw ? (
+                <Button
+                  variant="contained"
+                  sx={{
+                    minWidth: 120,
+                    borderRadius: 2,
+                    backgroundColor: playerColor,
+                    color: '#fff',
+                    transition: 'all 0.15s',
+                    '&:hover': {
+                      transform: 'scale(1.05)',
+                      filter: 'brightness(0.93)',
+                      backgroundColor: playerColor
+                    }
+                  }}
+                  onClick={handleDrawCard}
+                >
+                  Draw Card
+                </Button>
+              ) : isCurrentPlayer && isTokenPhase ? (
+                <Button
+                  variant="contained"
+                  sx={{
+                    minWidth: 120,
+                    borderRadius: 2,
+                    backgroundColor: playerColor,
+                    color: '#fff',
+                    transition: 'all 0.15s',
+                    '&:hover': {
+                      transform: 'scale(1.05)',
+                      filter: 'brightness(0.93)',
+                      backgroundColor: playerColor
+                    }
+                  }}
+                  onClick={handleEndTurn}
+                >
+                  End Turn
+                </Button>
+              ) : isCurrentPlayer ? (
+                <Typography variant="body2" sx={{ color: 'white', textAlign: 'center', fontSize: '0.95rem' }}>
+                  Play a card
+                </Typography>
+              ) : null}
             </Box>
             <Paper elevation={isCurrentPlayer ? 6 : 2} sx={{
               border: `3px solid ${playerColor}`,
@@ -798,7 +941,6 @@ export default function GameBoard({ setup }) {
               pt: 0,
               width: '100%',
               background: '#fff',
-              boxShadow: isCurrentPlayer ? `0 0 20px 8px ${playerColor}40` : undefined,
               display: 'flex', flexDirection: 'column', alignItems: 'center',
               gap: 1,
               position: 'relative',
@@ -837,10 +979,10 @@ export default function GameBoard({ setup }) {
                 justifyContent: 'space-between',
                 p: 1,
                 borderRadius: 1,
+                outline: isTokenPhase && isProfileValidTarget(i) ? '2px solid #4cff8d' : undefined,
+                border: isTokenPhase && isProfileValidTarget(i) ? '2px solid #4cff8d' : undefined,
                 background: isTokenPhase && isProfileValidTarget(i) ? '#f3eaff' : undefined,
                 cursor: isTokenPhase && isProfileValidTarget(i) ? 'pointer' : undefined,
-                border: isTokenPhase && isProfileValidTarget(i) ? '2px solid #4cff8d' : undefined,
-                outline: isTokenPhase && isProfileValidTarget(i) ? '2px solid #4cff8d' : undefined,
                 zIndex: isTokenPhase && isProfileValidTarget(i) ? 3 : 1
               }}
                 onClick={isTokenPhase && isProfileValidTarget(i) ? () => handlePlaceTokenOnProfile(i) : undefined}
@@ -864,9 +1006,9 @@ export default function GameBoard({ setup }) {
               <Box sx={{ width: '100%', height: 18, background: '#eee', borderRadius: 1, mb: 1, position: 'relative' }}>
                 <LinearProgress variant="determinate" value={Math.min(100, (player.position / BOARD_SIZE) * 100)} sx={{ height: 18, borderRadius: 1, background: '#eee', '& .MuiLinearProgress-bar': { background: playerColor } }} />
                 <Typography sx={{ position: 'absolute', left: 8, top: 0, fontSize: 12, color: '#333' }}>{player.position} / {BOARD_SIZE}</Typography>
-                {player.scoreGainedThisTurn && (
+                {player.scoreGainedThisTurn !== undefined && (
                   <Typography sx={{ position: 'absolute', right: 8, top: 0, fontSize: 12, color: playerColor, fontWeight: 'bold' }}>
-                    {player.scoreGainedThisTurn}
+                    {player.scoreGainedThisTurn > 0 ? `+${player.scoreGainedThisTurn}` : player.scoreGainedThisTurn}
                   </Typography>
                 )}
               </Box>
@@ -887,20 +1029,24 @@ export default function GameBoard({ setup }) {
                         flexDirection: 'row',
                         alignItems: 'center',
                         justifyContent: 'space-between',
-                        border: `2px solid ${cardInterestData.color}`,
+                        border: card.type === 'network' ? '2px solid #9147ff' : `2px solid ${cardInterestData.color}`,
                         background: '#fff',
                         cursor: isTokenPhase && isCardValidTarget(player, card) ? 'pointer' : undefined,
-                        boxShadow: isTokenPhase && isCardValidTarget(player, card) ? 'inset 0 0 10px 3px #4cff8d, 0 0 10px 3px #4cff8d' : undefined,
+                        outline: isTokenPhase && isCardValidTarget(player, card) ? '2px solid #4cff8d' : undefined,
+                        boxShadow: isTokenPhase && isCardValidTarget(player, card) ? '0 0 16px 4px #4cff8d80, 0 4px 24px 4px #0002' : undefined,
+                        transition: undefined,
                         borderRadius: 2,
                         margin: 0,
                         position: 'relative',
                         overflow: 'visible',
-                        outline: isTokenPhase && isCardValidTarget(player, card) ? '2px solid #4cff8d' : undefined,
-                        zIndex: isTokenPhase && isCardValidTarget(player, card) ? 3 : 1,
-                        transition: 'all 0.15s',
-                        '&:hover': isTokenPhase && isCardValidTarget(player, card) ? { transform: 'scale(1.05)', filter: 'brightness(0.93)' } : {}
                       }}
-                        onClick={isTokenPhase && isCardValidTarget(player, card) ? () => handlePlaceTokenOnCard(i, idx) : undefined}
+                        onClick={
+                          isTokenPhase && isCardValidTarget(player, card) ? () => handlePlaceTokenOnCard(i, idx)
+                          : isPlayable ? () => handlePlayCard(idx)
+                          : isSocialChallengeSelectOwn && socialChallengeState.revealedIdx === null ? () => handleSocialChallengeReveal(idx)
+                          : isMatching && !isOtherSelected ? () => handleSocialChallengeSelectOther(i, idx)
+                          : undefined
+                        }
                       >
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                           <span style={{ fontSize: 20 }}>{cardInterestData.icon}</span>
@@ -948,29 +1094,44 @@ export default function GameBoard({ setup }) {
                 <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', gap: 1, mt: 0.5 }}>
                   {player.hand.map((card, idx) => {
                     const cardInterestData = getInterestData(card.interest);
-                    const isPlayable = i === currentIdx && !mustDraw && !isTokenPhase;
+                    const isSocialChallengeReveal = socialChallengeState && socialChallengeState.phase === 'reveal' && i === currentIdx;
+                    const isSocialChallengeSelectOthers = socialChallengeState && socialChallengeState.phase === 'select-others' && i === socialChallengeState.pending[0];
+                    const isMatching = isSocialChallengeSelectOthers && card.interest === socialChallengeState.revealedInterest;
+                    const isOtherSelected = isSocialChallengeSelectOthers && socialChallengeState.selections && socialChallengeState.selections[i] === idx;
+                    const isCC = !card.type || card.type !== 'network';
+                    const isNC = card.type === 'network';
+                    const highlightCC = isSocialChallengeReveal && isCC;
+                    const disableNC = isSocialChallengeReveal && isNC;
                     return (
-                      <Paper key={idx} sx={{
-                        p: 1,
-                        width: '100%',
-                        maxWidth: 240,
-                        minWidth: 0,
-                        minHeight: 48,
-                        display: 'flex',
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        border: `2px solid ${card.type === 'network' ? '#9147ff' : cardInterestData.color}`,
-                        background: '#fff',
-                        cursor: isPlayable ? 'pointer' : undefined,
-                        borderRadius: 2,
-                        margin: 0,
-                        position: 'relative',
-                        overflow: 'visible',
-                        boxShadow: isPlayable ? '0 0 8px 2px #9147ff40' : undefined,
-                        transition: 'all 0.15s',
-                        '&:hover': isPlayable ? { transform: 'scale(1.05)', filter: 'brightness(0.93)' } : {}
-                      }} onClick={isPlayable ? () => handlePlayCard(idx) : undefined}>
+                      <Paper
+                        key={idx}
+                        sx={{
+                          p: 1,
+                          width: '100%',
+                          maxWidth: 240,
+                          minWidth: 0,
+                          minHeight: 48,
+                          display: 'flex',
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          border: card.type === 'network' ? '2px solid #9147ff' : `2px solid ${cardInterestData.color}`,
+                          background: '#fff',
+                          cursor: highlightCC ? 'pointer' : isPlayable ? 'pointer' : 'default',
+                          opacity: disableNC ? 0.5 : 1,
+                          pointerEvents: disableNC ? 'none' : highlightCC ? 'auto' : isPlayable ? 'auto' : 'auto',
+                          outline: highlightCC ? '2px solid #4cff8d' : undefined,
+                          boxShadow: highlightCC ? '0 0 0 3px #4cff8d, 0 5px 10px rgba(0,0,0,0.4)' : '0 1px 3px rgba(0,0,0,0.2)',
+                          zIndex: 1,
+                          '&:hover': highlightCC ? { filter: 'brightness(0.93)' } : isPlayable ? { transform: 'scale(1.05)', filter: 'brightness(0.93)' } : {}
+                        }}
+                        onClick={
+                          highlightCC ? () => handleSocialChallengeReveal(idx)
+                          : isPlayable ? () => handlePlayCard(idx)
+                          : isMatching && !isOtherSelected ? () => handleSocialChallengeSelectOther(i, idx)
+                          : undefined
+                        }
+                      >
                         {card.type === 'network' ? (
                           <Box sx={{ width: '100%' }}>
                             <div style={{ fontWeight: 700, fontSize: '0.8rem', color: '#9147ff' }}>{card.title}</div>
@@ -1024,8 +1185,6 @@ export default function GameBoard({ setup }) {
               <Box sx={{ width: '100%', minHeight: 40, background: '#f8f8ff', borderRadius: 1, p: 1, px: 2, boxSizing: 'border-box' }}>
                 <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 0.5, justifyContent: 'center' }}>
                   {sortTokens(player.tokens).map((token, idx) => {
-                    const isSelectable = i === currentIdx && isTokenPhase && token.count > 0;
-                    // Only highlight as selected if this is the current player
                     const isSelected = i === currentIdx && selectedToken && selectedToken.type === token.type;
                     return (
                       <Box
@@ -1036,17 +1195,16 @@ export default function GameBoard({ setup }) {
                           borderRadius: '50%',
                           backgroundColor: token.count > 0 ? cardInterestData.color : '#ccc',
                           color: 'white',
-                          cursor: isSelectable ? 'pointer' : 'default',
-                          transform: isSelected ? 'scale(1.15)' : 'scale(1)',
-                          boxShadow: isSelected ? '0 0 0 3px #3d91ff, 0 5px 10px rgba(0,0,0,0.4)' : '0 1px 3px rgba(0,0,0,0.2)',
+                          cursor: 'pointer',
+                          boxShadow: isSelected ? '0 0 0 3px #4cff8d, 0 5px 10px rgba(0,0,0,0.4)' : '0 1px 3px rgba(0,0,0,0.2)',
                           transition: 'all 0.15s',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
                           fontSize: 22,
-                          '&:hover': isSelectable ? { transform: 'scale(1.05)', filter: 'brightness(0.93)' } : {}
+                          '&:hover': { transform: 'scale(1.05)', filter: 'brightness(0.93)' }
                         }}
-                        onClick={isSelectable ? () => handleSelectToken(token.type) : undefined}
+                        onClick={() => handleSelectToken(token.type)}
                         title={token.tooltip}
                       >
                         {getMaterialIcon(token.type)}
