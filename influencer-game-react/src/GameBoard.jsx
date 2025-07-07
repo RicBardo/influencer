@@ -166,6 +166,19 @@ export default function GameBoard({ setup }) {
   const [scoreLog, setScoreLog] = useState('');
   const [gameEnded, setGameEnded] = useState(false);
   const [winner, setWinner] = useState(null);
+  const [scoreIndicators, setScoreIndicators] = useState({});
+
+  // Utility to show indicator for 3 seconds without mutating players
+  function showScoreIndicator(playerIdx, value) {
+    setScoreIndicators(prev => ({ ...prev, [playerIdx]: value }));
+    setTimeout(() => {
+      setScoreIndicators(prev => {
+        const updated = { ...prev };
+        delete updated[playerIdx];
+        return updated;
+      });
+    }, 3000);
+  }
 
   useEffect(() => {
     if (!setup) return;
@@ -469,6 +482,7 @@ export default function GameBoard({ setup }) {
 
     if (score > 0) {
       newPlayers[lastPlayerIndex].scoreGainedThisTurn = score;
+      showScoreIndicator(lastPlayerIndex, score);
     }
 
     newPlayers[lastPlayerIndex].position = Math.min(BOARD_SIZE, newPlayers[lastPlayerIndex].position + score);
@@ -539,6 +553,7 @@ export default function GameBoard({ setup }) {
         setDiscard(newDiscard);
         setTokensDump(newTokensDump);
         setIsTokenPhase(true);
+        showScoreIndicator(currentIdx, postsCount);
         break;
       }
       case 'stalker': {
@@ -874,9 +889,9 @@ export default function GameBoard({ setup }) {
               <Box sx={{ width: '100%', height: 18, background: '#eee', borderRadius: 1, mb: 1, position: 'relative' }}>
                 <LinearProgress variant="determinate" value={Math.min(100, (player.position / BOARD_SIZE) * 100)} sx={{ height: 18, borderRadius: 1, background: '#eee', '& .MuiLinearProgress-bar': { background: playerColor } }} />
                 <Typography sx={{ position: 'absolute', left: 8, top: 0, fontSize: 12, color: '#333' }}>{player.position} / {BOARD_SIZE}</Typography>
-                {player.scoreGainedThisTurn && (
+                {scoreIndicators[i] !== undefined && (
                   <Typography sx={{ position: 'absolute', right: 8, top: 0, fontSize: 12, color: playerColor, fontWeight: 'bold' }}>
-                    {player.scoreGainedThisTurn < 0 ? `-${Math.abs(player.scoreGainedThisTurn)}` : `+${player.scoreGainedThisTurn}`}
+                    {scoreIndicators[i] < 0 ? `-${Math.abs(scoreIndicators[i])}` : `+${scoreIndicators[i]}`}
                   </Typography>
                 )}
               </Box>
