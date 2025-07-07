@@ -321,14 +321,15 @@ export default function GameBoard({ setup }) {
     if (card.type === 'network') {
       applyNetworkCardEffect(card);
       // Remove network card from hand and add to discard pile
-      const newPlayers = [...players];
-      const newDiscard = [...discard, card];
-      newPlayers[currentIdx] = {
-        ...currentPlayer,
-        hand: currentPlayer.hand.filter((_, i) => i !== idx)
-      };
-      setPlayers(newPlayers);
-      setDiscard(newDiscard);
+      setPlayers(prevPlayers => {
+        const updatedPlayers = [...prevPlayers];
+        updatedPlayers[currentIdx] = {
+          ...prevPlayers[currentIdx],
+          hand: prevPlayers[currentIdx].hand.filter((_, i) => i !== idx)
+        };
+        return updatedPlayers;
+      });
+      setDiscard(prevDiscard => [...prevDiscard, card]);
       return;
     }
 
@@ -533,28 +534,27 @@ export default function GameBoard({ setup }) {
         return;
       }
       case 'sponsored': {
-        // Count posts of player's interest on all walls
-        const playerInterest = currentPlayer.interest;
+        // Count posts of player's innate interest (not acquired) on all walls
+        const playerInnateInterest = currentPlayer.interest;
         const postsCount = players.reduce((count, player) => {
-          return count + player.wall.filter(card => card.interest === playerInterest).length;
+          return count + player.wall.filter(card => card.interest === playerInnateInterest).length;
         }, 0);
 
         // Add points immediately and show +N indicator
-        const newPlayers = [...players];
-        newPlayers[currentIdx] = {
+        const updatedPlayers = [...players];
+        updatedPlayers[currentIdx] = {
           ...currentPlayer,
           position: currentPlayer.position + postsCount,
           scoreGainedThisTurn: postsCount
         };
 
-        // Update state to enable token phase and end turn
-        setPlayers(newPlayers);
+        setPlayers(updatedPlayers);
         setDeck(newDeck);
         setDiscard(newDiscard);
         setTokensDump(newTokensDump);
         setIsTokenPhase(true);
         showScoreIndicator(currentIdx, postsCount);
-        break;
+        return; // Prevents the outer setPlayers from overwriting
       }
       case 'stalker': {
         // Gain 3 Like tokens
@@ -897,7 +897,7 @@ export default function GameBoard({ setup }) {
               </Box>
               {/* Wall - fixed height for 3 cards, 16px left/right padding */}
               <Box sx={{ width: '100%', height: 268, background: '#f8f8ff', borderRadius: 1, p: 1, px: 2, boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
-                <Typography variant="caption" color="text.secondary" sx={{ flex: '0 0 auto' }}>Wall</Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ flex: '0 0 auto', textAlign: 'center', width: '100%' }}>Wall</Typography>
                 <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', gap: 1, mt: 0.5, height: '100%', overflowY: 'auto', justifyContent: 'flex-end', flex: '1 1 0' }}>
                   {player.wall.map((card, idx) => {
                     const cardInterestData = getInterestData(card.interest);
@@ -969,7 +969,7 @@ export default function GameBoard({ setup }) {
               </Box>
               {/* Hand - 16px left/right padding */}
               <Box sx={{ width: '100%', minHeight: 40, background: '#f8f8ff', borderRadius: 1, p: 1, px: 2, boxSizing: 'border-box' }}>
-                <Typography variant="caption" color="text.secondary">Hand</Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center', width: '100%', display: 'flex', justifyContent: 'center' }}>Hand</Typography>
                 <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', gap: 1, mt: 0.5 }}>
                   {player.hand.map((card, idx) => {
                     const cardInterestData = getInterestData(card.interest);
