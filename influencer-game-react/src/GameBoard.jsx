@@ -1494,12 +1494,12 @@ export default function GameBoard({ setup }) {
         disableBackdropClick
       >
         <DialogTitle sx={{ textAlign: 'center', fontWeight: 700 }}>
-          CONTENT PLANNER - Select 3 Cards
+          CONTENT PLANNER
         </DialogTitle>
         <DialogContent>
           <Box sx={{ mb: 2 }}>
             <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', mb: 2 }}>
-              Select exactly 3 cards to add to your hand. Click to select/deselect.
+              Select 3 cards to add to your hand
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center' }}>
               Selected: {contentPlannerState?.selectedCards?.length || 0}/3
