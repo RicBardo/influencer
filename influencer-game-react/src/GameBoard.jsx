@@ -86,7 +86,7 @@ document.head.appendChild(link);
 const BOARD_SIZE = 40;
 
 function createDeck(players, networkCardsEnabled) {
-  const newDeck = [];
+  let newDeck = [];
   // Collect all unique interests in play
   const interestsInPlay = [...new Set(players.map(p => p.interest))];
   interestsInPlay.forEach(interest => {
@@ -94,13 +94,14 @@ function createDeck(players, networkCardsEnabled) {
     for (let i = 0; i < 3; i++) newDeck.push({ interest, value: 2 });
     newDeck.push({ interest, value: 3 });
   });
-  // Add 10 SOCIAL CHALLENGE Network Cards if enabled (for focused testing)
+  // Add Network Cards if enabled (10x STEAL IDEA for testing)
   if (networkCardsEnabled) {
+    // 10x STEAL IDEA
     for (let i = 0; i < 10; i++) {
       newDeck.push({
-        title: 'SOCIAL CHALLENGE',
-        description: 'Reveal a post from your hand and gain 2 Pp. All players with a card of the same interest also get 2 Pp. Others lose 2 Pp.',
-        effectKey: 'challenge',
+        title: 'STEAL IDEA',
+        description: 'Remove one post from another influencer\'s wall and publish it on your wall.',
+        effectKey: 'steal',
         type: 'network',
       });
     }
@@ -169,6 +170,7 @@ export default function GameBoard({ setup }) {
   const [scoreIndicators, setScoreIndicators] = useState({});
   const [socialChallengeState, setSocialChallengeState] = useState(null); // New state for Social Challenge
   const [hasPlayedCardThisTurn, setHasPlayedCardThisTurn] = useState(false); // New state to prevent playing another card
+  const [stealState, setStealState] = useState(null); // New state for Steal Idea
 
   // Utility to show indicator for 3 seconds without mutating players
   function showScoreIndicator(playerIdx, value) {
@@ -217,6 +219,7 @@ export default function GameBoard({ setup }) {
     setGameEnded(false);
     setWinner(null);
     setSocialChallengeState(null);
+    setStealState(null);
     setHasPlayedCardThisTurn(false);
   }, [setup]);
 
@@ -498,6 +501,7 @@ export default function GameBoard({ setup }) {
     setSelectedToken(null);
     setIsTokenPhase(false);
     setSocialChallengeState(null);
+    setStealState(null);
     setHasPlayedCardThisTurn(false);
   };
 
@@ -511,6 +515,13 @@ export default function GameBoard({ setup }) {
 
     switch (card.effectKey) {
       case 'shitstorm': {
+        // Remove network card from hand and add to discard pile immediately
+        newPlayers[currentIdx] = {
+          ...newPlayers[currentIdx],
+          hand: newPlayers[currentIdx].hand.filter((_, i) => i !== handIdx)
+        };
+        newDiscard.push(card);
+        
         // All other players lose 3 PP (min 0), show -3 indicator, no popup
         newPlayers.forEach((p, i) => {
           if (i !== currentIdx) {
@@ -518,6 +529,7 @@ export default function GameBoard({ setup }) {
             const lost = Math.min(3, p.position);
             p.position = Math.max(0, p.position - 3);
             p.scoreGainedThisTurn = -lost; // Show -3 (or -2/-1 if near zero)
+            showScoreIndicator(i, -lost); // Show the score indicator
           }
         });
         // No modal or popup
@@ -530,6 +542,13 @@ export default function GameBoard({ setup }) {
         return;
       }
       case 'sponsored': {
+        // Remove network card from hand and add to discard pile immediately
+        newPlayers[currentIdx] = {
+          ...newPlayers[currentIdx],
+          hand: newPlayers[currentIdx].hand.filter((_, i) => i !== handIdx)
+        };
+        newDiscard.push(card);
+        
         // Count posts of player's innate interest (not acquired) on all walls
         const playerInnateInterest = currentPlayer.interest;
         const postsCount = players.reduce((count, player) => {
@@ -537,14 +556,13 @@ export default function GameBoard({ setup }) {
         }, 0);
 
         // Add points immediately and show +N indicator
-        const updatedPlayers = [...players];
-        updatedPlayers[currentIdx] = {
-          ...currentPlayer,
-          position: currentPlayer.position + postsCount,
+        newPlayers[currentIdx] = {
+          ...newPlayers[currentIdx],
+          position: newPlayers[currentIdx].position + postsCount,
           scoreGainedThisTurn: postsCount
         };
 
-        setPlayers(updatedPlayers);
+        setPlayers(newPlayers);
         setDeck(newDeck);
         setDiscard(newDiscard);
         setTokensDump(newTokensDump);
@@ -573,21 +591,42 @@ export default function GameBoard({ setup }) {
         return;
       }
       case 'steal': {
-        // Remove one post from another influencer's wall and publish it on your wall.
-        // This effect is not directly implemented here, as it requires a specific card to be removed.
-        // It would involve finding a card to steal from and updating the wall.
-        // For now, we'll just log the effect.
-        effectText = 'STEAL IDEA:\nRemove one post from another influencer\'s wall and publish it on your wall.';
-        break;
+        // Remove network card from hand and add to discard pile immediately
+        newPlayers[currentIdx] = {
+          ...newPlayers[currentIdx],
+          hand: newPlayers[currentIdx].hand.filter((_, i) => i !== handIdx)
+        };
+        newDiscard.push(card);
+        
+        // Set state to allow selecting a card from another player's wall
+        setStealState({
+          phase: 'select',
+          targetPlayerIdx: null,
+          targetCardIdx: null
+        });
+        setIsTokenPhase(false); // Block token phase until steal is resolved
+        setHasPlayedCardThisTurn(true); // Prevent playing another card
+        
+        setPlayers(newPlayers);
+        setDeck(newDeck);
+        setDiscard(newDiscard);
+        setTokensDump(newTokensDump);
+        return;
       }
       case 'planner': {
+        // Remove network card from hand and add to discard pile immediately
+        newPlayers[currentIdx] = {
+          ...newPlayers[currentIdx],
+          hand: newPlayers[currentIdx].hand.filter((_, i) => i !== handIdx)
+        };
+        newDiscard.push(card);
+        
         // Collect all players' hands. Add 3 posts to your hand, then shuffle and redistribute the rest
         const allHands = players.map(p => p.hand);
-        const newDeck = [...deck];
         for (let i = 0; i < 3; i++) newDeck.push({ interest: currentPlayer.interest, value: 1 });
         newDeck = shuffleDeck(newDeck);
         newPlayers[currentIdx] = {
-          ...currentPlayer,
+          ...newPlayers[currentIdx],
           hand: newDeck.slice(0, 3)
         };
         allHands.forEach(hand => {
@@ -609,17 +648,21 @@ export default function GameBoard({ setup }) {
         return;
       }
       case 'bot': {
+        // Remove network card from hand and add to discard pile immediately
+        newPlayers[currentIdx] = {
+          ...newPlayers[currentIdx],
+          hand: newPlayers[currentIdx].hand.filter((_, i) => i !== handIdx)
+        };
+        newDiscard.push(card);
+        
         // Browse the deck, publish up to 3 posts directly on your wall, then shuffle the deck.
-        const newDeck = [...deck];
-        const newDiscard = [...discard];
-        let newTokensDump = [...tokensDump];
         let publishedPosts = 0;
         while (publishedPosts < 3 && newDeck.length > 0) {
           const drawnCard = newDeck.shift();
           if (drawnCard.interest === currentPlayer.interest) {
             newPlayers[currentIdx] = {
-              ...currentPlayer,
-              hand: [...currentPlayer.hand, drawnCard]
+              ...newPlayers[currentIdx],
+              hand: [...newPlayers[currentIdx].hand, drawnCard]
             };
             publishedPosts++;
           } else {
@@ -636,6 +679,13 @@ export default function GameBoard({ setup }) {
         return;
       }
       case 'stalker': {
+        // Remove network card from hand and add to discard pile immediately
+        newPlayers[currentIdx] = {
+          ...newPlayers[currentIdx],
+          hand: newPlayers[currentIdx].hand.filter((_, i) => i !== handIdx)
+        };
+        newDiscard.push(card);
+        
         // Gain 3 Like tokens
         const token = newPlayers[currentIdx].tokens.find(t => t.type === 'like');
         token.count += 3;
@@ -643,6 +693,13 @@ export default function GameBoard({ setup }) {
         break;
       }
       case 'troll': {
+        // Remove network card from hand and add to discard pile immediately
+        newPlayers[currentIdx] = {
+          ...newPlayers[currentIdx],
+          hand: newPlayers[currentIdx].hand.filter((_, i) => i !== handIdx)
+        };
+        newDiscard.push(card);
+        
         // Gain 3 Dislike tokens
         const token = newPlayers[currentIdx].tokens.find(t => t.type === 'dislike');
         token.count += 3;
@@ -650,6 +707,13 @@ export default function GameBoard({ setup }) {
         break;
       }
       case 'opinion': {
+        // Remove network card from hand and add to discard pile immediately
+        newPlayers[currentIdx] = {
+          ...newPlayers[currentIdx],
+          hand: newPlayers[currentIdx].hand.filter((_, i) => i !== handIdx)
+        };
+        newDiscard.push(card);
+        
         // Prompt for Follow or Ban token
         setModalContent({
           title: 'OPINION MAKER',
@@ -663,6 +727,13 @@ export default function GameBoard({ setup }) {
         return;
       }
       case 'active': {
+        // Remove network card from hand and add to discard pile immediately
+        newPlayers[currentIdx] = {
+          ...newPlayers[currentIdx],
+          hand: newPlayers[currentIdx].hand.filter((_, i) => i !== handIdx)
+        };
+        newDiscard.push(card);
+        
         // Prompt for Share or Report token
         setModalContent({
           title: 'ACTIVE USER',
@@ -814,6 +885,64 @@ export default function GameBoard({ setup }) {
     console.log('Social challenge select other:', playerIdx, cardIdx);
   };
 
+  // Add handler for stealing a card from another player's wall
+  const handleStealCard = (targetPlayerIdx, targetCardIdx) => {
+    const targetPlayer = players[targetPlayerIdx];
+    const stolenCard = targetPlayer.wall[targetCardIdx];
+    
+    if (!stolenCard) return;
+    
+    const newPlayers = [...players];
+    
+    // Remove the card from the target player's wall
+    newPlayers[targetPlayerIdx] = {
+      ...newPlayers[targetPlayerIdx],
+      wall: newPlayers[targetPlayerIdx].wall.filter((_, i) => i !== targetCardIdx)
+    };
+    
+    // Add the stolen card to the current player's wall (with turnPosted flag)
+    const stolenCardWithFlag = { ...stolenCard, turnPosted: true };
+    let newWall = [stolenCardWithFlag, ...newPlayers[currentIdx].wall];
+    
+    // Handle wall overflow (max 3 cards)
+    if (newWall.length > 3) {
+      // Remove oldest card (last in array) and return tokens to owners
+      let removedCard = newWall[newWall.length - 1];
+      if (removedCard.tokens && removedCard.tokens.length > 0) {
+        removedCard.tokens.forEach(token => {
+          const ownerIdx = newPlayers.findIndex(p => p.name === token.player.name);
+          if (ownerIdx !== -1) {
+            let ownerTokens = [...newPlayers[ownerIdx].tokens];
+            const tokenIdx = ownerTokens.findIndex(t => t.type === token.type);
+            if (tokenIdx !== -1) {
+              ownerTokens[tokenIdx] = { ...ownerTokens[tokenIdx], count: ownerTokens[tokenIdx].count + 1 };
+            } else {
+              ownerTokens.push({ type: token.type, count: 1, playerId: ownerIdx });
+            }
+            newPlayers[ownerIdx].tokens = sortTokens(ownerTokens);
+          }
+        });
+      }
+      // Remove tokens from card before discarding
+      removedCard = { ...removedCard, tokens: [] };
+      setDiscard(prev => [...prev, removedCard]);
+      newWall = newWall.slice(0, 3); // Keep only the 3 newest cards
+    }
+    
+    // Update current player's wall
+    newPlayers[currentIdx] = {
+      ...newPlayers[currentIdx],
+      wall: newWall
+    };
+    
+    setPlayers(newPlayers);
+    
+    // Clear steal state and enter token phase
+    setStealState(null);
+    setIsTokenPhase(true);
+    setHasPlayedCardThisTurn(false);
+  };
+
   // Game end screen
   if (gameEnded && winner) {
     return (
@@ -910,6 +1039,10 @@ export default function GameBoard({ setup }) {
               {isCurrentPlayer && socialChallengeState && socialChallengeState.phase === 'reveal' ? (
                 <Typography variant="body2" sx={{ color: 'white', textAlign: 'center', fontSize: '0.95rem' }}>
                   Reveal card
+                </Typography>
+              ) : isCurrentPlayer && stealState && stealState.phase === 'select' ? (
+                <Typography variant="body2" sx={{ color: 'white', textAlign: 'center', fontSize: '0.95rem' }}>
+                  Select card to steal
                 </Typography>
               ) : isCurrentPlayer && mustDraw ? (
                 <Button
@@ -1049,18 +1182,22 @@ export default function GameBoard({ setup }) {
                         justifyContent: 'space-between',
                         border: `2px solid ${cardInterestData.color}`,
                         background: '#fff',
-                        cursor: isTokenPhase && isCardValidTarget(player, card) ? 'pointer' : undefined,
-                        boxShadow: isTokenPhase && isCardValidTarget(player, card) ? 'inset 0 0 10px 3px #4cff8d, 0 0 10px 3px #4cff8d' : undefined,
+                        cursor: (isTokenPhase && isCardValidTarget(player, card)) || (stealState && stealState.phase === 'select' && i !== currentIdx) ? 'pointer' : undefined,
+                        boxShadow: (isTokenPhase && isCardValidTarget(player, card)) || (stealState && stealState.phase === 'select' && i !== currentIdx) ? 'inset 0 0 10px 3px #4cff8d, 0 0 10px 3px #4cff8d' : undefined,
                         borderRadius: 2,
                         margin: 0,
                         position: 'relative',
                         overflow: 'visible',
-                        outline: isTokenPhase && isCardValidTarget(player, card) ? '2px solid #4cff8d' : undefined,
-                        zIndex: isTokenPhase && isCardValidTarget(player, card) ? 3 : 1,
+                        outline: (isTokenPhase && isCardValidTarget(player, card)) || (stealState && stealState.phase === 'select' && i !== currentIdx) ? '2px solid #4cff8d' : undefined,
+                        zIndex: (isTokenPhase && isCardValidTarget(player, card)) || (stealState && stealState.phase === 'select' && i !== currentIdx) ? 3 : 1,
                         transition: 'all 0.15s',
-                        '&:hover': isTokenPhase && isCardValidTarget(player, card) ? { transform: 'scale(1.05)', filter: 'brightness(0.93)' } : {}
+                        '&:hover': (isTokenPhase && isCardValidTarget(player, card)) || (stealState && stealState.phase === 'select' && i !== currentIdx) ? { transform: 'scale(1.05)', filter: 'brightness(0.93)' } : {}
                       }}
-                        onClick={isTokenPhase && isCardValidTarget(player, card) ? () => handlePlaceTokenOnCard(i, idx) : undefined}
+                        onClick={
+                          isTokenPhase && isCardValidTarget(player, card) ? () => handlePlaceTokenOnCard(i, idx)
+                          : stealState && stealState.phase === 'select' && i !== currentIdx ? () => handleStealCard(i, idx)
+                          : undefined
+                        }
                       >
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                           <span style={{ fontSize: 20 }}>{cardInterestData.icon}</span>
