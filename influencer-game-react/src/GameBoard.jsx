@@ -94,14 +94,14 @@ function createDeck(players, networkCardsEnabled) {
     for (let i = 0; i < 3; i++) newDeck.push({ interest, value: 2 });
     newDeck.push({ interest, value: 3 });
   });
-  // Add Network Cards if enabled (10x STEAL IDEA for testing)
+  // Add Network Cards if enabled (10x CONTENT PLANNER for testing)
   if (networkCardsEnabled) {
-    // 10x STEAL IDEA
+    // 10x CONTENT PLANNER
     for (let i = 0; i < 10; i++) {
       newDeck.push({
-        title: 'STEAL IDEA',
-        description: 'Remove one post from another influencer\'s wall and publish it on your wall.',
-        effectKey: 'steal',
+        title: 'CONTENT PLANNER',
+        description: 'Collect all players\' hands. Add 3 posts to your hand, then shuffle and redistribute the rest',
+        effectKey: 'planner',
         type: 'network',
       });
     }
@@ -171,6 +171,7 @@ export default function GameBoard({ setup }) {
   const [socialChallengeState, setSocialChallengeState] = useState(null); // New state for Social Challenge
   const [hasPlayedCardThisTurn, setHasPlayedCardThisTurn] = useState(false); // New state to prevent playing another card
   const [stealState, setStealState] = useState(null); // New state for Steal Idea
+  const [contentPlannerState, setContentPlannerState] = useState(null); // New state for Content Planner
 
   // Utility to show indicator for 3 seconds without mutating players
   function showScoreIndicator(playerIdx, value) {
@@ -220,6 +221,7 @@ export default function GameBoard({ setup }) {
     setWinner(null);
     setSocialChallengeState(null);
     setStealState(null);
+    setContentPlannerState(null);
     setHasPlayedCardThisTurn(false);
   }, [setup]);
 
@@ -502,6 +504,7 @@ export default function GameBoard({ setup }) {
     setIsTokenPhase(false);
     setSocialChallengeState(null);
     setStealState(null);
+    setContentPlannerState(null);
     setHasPlayedCardThisTurn(false);
   };
 
@@ -621,30 +624,31 @@ export default function GameBoard({ setup }) {
         };
         newDiscard.push(card);
         
-        // Collect all players' hands. Add 3 posts to your hand, then shuffle and redistribute the rest
-        const allHands = players.map(p => p.hand);
-        for (let i = 0; i < 3; i++) newDeck.push({ interest: currentPlayer.interest, value: 1 });
-        newDeck = shuffleDeck(newDeck);
-        newPlayers[currentIdx] = {
-          ...newPlayers[currentIdx],
-          hand: newDeck.slice(0, 3)
-        };
-        allHands.forEach(hand => {
-          hand.forEach(card => {
-            if (card.interest !== currentPlayer.interest) {
-              newDeck.push(card);
-            }
-          });
+        // Collect all players' hands into a pile
+        let allCards = [];
+        players.forEach(player => {
+          allCards.push(...player.hand);
         });
-        newDeck = shuffleDeck(newDeck);
-        newPlayers.forEach(p => p.hand = newDeck.slice(0, 3));
-        newDeck = newDeck.slice(3);
+        
+        // Add 3 new Content Cards of current player's interest
+        for (let i = 0; i < 3; i++) {
+          allCards.push({ interest: currentPlayer.interest, value: 1 });
+        }
+        
+        // Set state to show modal with all cards for selection
+        setContentPlannerState({
+          phase: 'select',
+          allCards: allCards,
+          selectedCards: [],
+          remainingCards: []
+        });
+        setIsTokenPhase(false); // Block token phase until selection is complete
+        setHasPlayedCardThisTurn(true); // Prevent playing another card
+        
         setPlayers(newPlayers);
         setDeck(newDeck);
         setDiscard(newDiscard);
         setTokensDump(newTokensDump);
-        setIsTokenPhase(true);
-        showScoreIndicator(currentIdx, 3);
         return;
       }
       case 'bot': {
@@ -885,6 +889,81 @@ export default function GameBoard({ setup }) {
     console.log('Social challenge select other:', playerIdx, cardIdx);
   };
 
+  // Add handler for Content Planner card selection
+  const handleContentPlannerSelectCard = (cardIndex) => {
+    if (!contentPlannerState || contentPlannerState.phase !== 'select') return;
+    
+    const card = contentPlannerState.allCards[cardIndex];
+    const isSelected = contentPlannerState.selectedCards.some(selected => 
+      selected.index === cardIndex
+    );
+    
+    if (isSelected) {
+      // Deselect card
+      setContentPlannerState(prev => ({
+        ...prev,
+        selectedCards: prev.selectedCards.filter(selected => selected.index !== cardIndex)
+      }));
+    } else {
+      // Select card (max 3)
+      if (contentPlannerState.selectedCards.length < 3) {
+        setContentPlannerState(prev => ({
+          ...prev,
+          selectedCards: [...prev.selectedCards, { card, index: cardIndex }]
+        }));
+      }
+    }
+  };
+
+  // Add handler for Content Planner confirmation
+  const handleContentPlannerConfirm = () => {
+    if (!contentPlannerState || contentPlannerState.selectedCards.length !== 3) return;
+    
+    const selectedCards = contentPlannerState.selectedCards.map(selected => selected.card);
+    const remainingCards = contentPlannerState.allCards.filter((_, index) => 
+      !contentPlannerState.selectedCards.some(selected => selected.index === index)
+    );
+    
+    // Shuffle remaining cards
+    const shuffledRemaining = shuffleDeck(remainingCards);
+    
+    const newPlayers = [...players];
+    
+    // Give selected cards to current player
+    newPlayers[currentIdx] = {
+      ...newPlayers[currentIdx],
+      hand: selectedCards
+    };
+    
+    // Redistribute remaining cards among other players (3 each)
+    let cardIndex = 0;
+    newPlayers.forEach((player, idx) => {
+      if (idx !== currentIdx) {
+        const playerCards = [];
+        for (let i = 0; i < 3 && cardIndex < shuffledRemaining.length; i++) {
+          playerCards.push(shuffledRemaining[cardIndex]);
+          cardIndex++;
+        }
+        newPlayers[idx] = {
+          ...newPlayers[idx],
+          hand: playerCards
+        };
+      }
+    });
+    
+    // Add any remaining cards back to the deck
+    if (cardIndex < shuffledRemaining.length) {
+      setDeck(prev => [...prev, ...shuffledRemaining.slice(cardIndex)]);
+    }
+    
+    setPlayers(newPlayers);
+    
+    // Clear content planner state and enter token phase
+    setContentPlannerState(null);
+    setIsTokenPhase(true);
+    setHasPlayedCardThisTurn(false);
+  };
+
   // Add handler for stealing a card from another player's wall
   const handleStealCard = (targetPlayerIdx, targetCardIdx) => {
     const targetPlayer = players[targetPlayerIdx];
@@ -1043,6 +1122,10 @@ export default function GameBoard({ setup }) {
               ) : isCurrentPlayer && stealState && stealState.phase === 'select' ? (
                 <Typography variant="body2" sx={{ color: 'white', textAlign: 'center', fontSize: '0.95rem' }}>
                   Select card to steal
+                </Typography>
+              ) : isCurrentPlayer && contentPlannerState && contentPlannerState.phase === 'select' ? (
+                <Typography variant="body2" sx={{ color: 'white', textAlign: 'center', fontSize: '0.95rem' }}>
+                  Select 3 cards
                 </Typography>
               ) : isCurrentPlayer && mustDraw ? (
                 <Button
@@ -1398,6 +1481,91 @@ export default function GameBoard({ setup }) {
               {action.text}
             </Button>
           ))}
+        </DialogActions>
+      </Dialog>
+
+      {/* Content Planner Modal */}
+      <Dialog 
+        open={contentPlannerState && contentPlannerState.phase === 'select'} 
+        onClose={() => {}} 
+        maxWidth="lg" 
+        fullWidth
+        disableEscapeKeyDown
+        disableBackdropClick
+      >
+        <DialogTitle sx={{ textAlign: 'center', fontWeight: 700 }}>
+          CONTENT PLANNER - Select 3 Cards
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', mb: 2 }}>
+              Select exactly 3 cards to add to your hand. Click to select/deselect.
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center' }}>
+              Selected: {contentPlannerState?.selectedCards?.length || 0}/3
+            </Typography>
+          </Box>
+          <Box sx={{ 
+            display: 'grid', 
+            gridTemplateColumns: 'repeat(4, 1fr)', 
+            gap: 2,
+            maxHeight: '60vh',
+            overflowY: 'auto'
+          }}>
+            {contentPlannerState?.allCards?.map((card, index) => {
+              const cardInterestData = getInterestData(card.interest);
+              const isSelected = contentPlannerState?.selectedCards?.some(selected => selected.index === index);
+              return (
+                <Paper key={index} sx={{
+                  p: 1,
+                  minHeight: 80,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  border: `2px solid ${card.type === 'network' ? '#9147ff' : cardInterestData.color}`,
+                  background: isSelected ? '#e3f2fd' : '#fff',
+                  cursor: 'pointer',
+                  outline: isSelected ? '2px solid #2196f3' : undefined,
+                  boxShadow: isSelected ? '0 0 0 3px #2196f3, 0 5px 10px rgba(0,0,0,0.4)' : '0 1px 3px rgba(0,0,0,0.2)',
+                  borderRadius: 2,
+                  transition: 'all 0.15s',
+                  '&:hover': { transform: 'scale(1.05)', filter: 'brightness(0.93)' }
+                }} onClick={() => handleContentPlannerSelectCard(index)}>
+                  {card.type === 'network' ? (
+                    <Box sx={{ width: '100%', textAlign: 'center' }}>
+                      <div style={{ fontWeight: 700, fontSize: '0.8rem', color: '#9147ff' }}>{card.title}</div>
+                      <div style={{ fontSize: '0.7rem', color: '#666' }}>{card.description}</div>
+                    </Box>
+                  ) : (
+                    <>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                        <span style={{ fontSize: 20 }}>{cardInterestData.icon}</span>
+                        <span style={{ fontWeight: 700, fontSize: '0.8rem' }}>{card.interest ? card.interest.charAt(0).toUpperCase() + card.interest.slice(1) : ''}</span>
+                      </Box>
+                      <span style={{ fontWeight: 900, fontSize: 22, color: cardInterestData.color }}>{card.value}</span>
+                    </>
+                  )}
+                </Paper>
+              );
+            })}
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ justifyContent: 'center', pb: 2 }}>
+          <Button 
+            onClick={handleContentPlannerConfirm}
+            variant="contained" 
+            color="primary"
+            disabled={!contentPlannerState || contentPlannerState.selectedCards.length !== 3}
+            sx={{ 
+              borderRadius: 2, 
+              transition: 'all 0.15s', 
+              '&:hover': { transform: 'scale(1.05)', filter: 'brightness(0.93)' },
+              '&:disabled': { opacity: 0.5 }
+            }}
+          >
+            Confirm ({contentPlannerState?.selectedCards?.length || 0}/3)
+          </Button>
         </DialogActions>
       </Dialog>
     </>
