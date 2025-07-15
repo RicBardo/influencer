@@ -94,14 +94,14 @@ function createDeck(players, networkCardsEnabled) {
     for (let i = 0; i < 3; i++) newDeck.push({ interest, value: 2 });
     newDeck.push({ interest, value: 3 });
   });
-  // Add Network Cards if enabled (10x CONTENT PLANNER for testing)
+  // Add Network Cards if enabled (10x BOT for testing)
   if (networkCardsEnabled) {
-    // 10x CONTENT PLANNER
+    // 10x BOT
     for (let i = 0; i < 10; i++) {
       newDeck.push({
-        title: 'CONTENT PLANNER',
-        description: 'Collect all players\' hands. Add 3 posts to your hand, then shuffle and redistribute the rest',
-        effectKey: 'planner',
+        title: 'BOT',
+        description: 'Browse the deck, choose up to 3 Content Cards and publish them directly on your wall, then shuffle the deck.',
+        effectKey: 'bot',
         type: 'network',
       });
     }
@@ -172,6 +172,7 @@ export default function GameBoard({ setup }) {
   const [hasPlayedCardThisTurn, setHasPlayedCardThisTurn] = useState(false); // New state to prevent playing another card
   const [stealState, setStealState] = useState(null); // New state for Steal Idea
   const [contentPlannerState, setContentPlannerState] = useState(null); // New state for Content Planner
+  const [botState, setBotState] = useState(null); // New state for Bot
 
   // Utility to show indicator for 3 seconds without mutating players
   function showScoreIndicator(playerIdx, value) {
@@ -222,6 +223,7 @@ export default function GameBoard({ setup }) {
     setSocialChallengeState(null);
     setStealState(null);
     setContentPlannerState(null);
+    setBotState(null);
     setHasPlayedCardThisTurn(false);
   }, [setup]);
 
@@ -505,6 +507,7 @@ export default function GameBoard({ setup }) {
     setSocialChallengeState(null);
     setStealState(null);
     setContentPlannerState(null);
+    setBotState(null);
     setHasPlayedCardThisTurn(false);
   };
 
@@ -659,27 +662,23 @@ export default function GameBoard({ setup }) {
         };
         newDiscard.push(card);
         
-        // Browse the deck, publish up to 3 posts directly on your wall, then shuffle the deck.
-        let publishedPosts = 0;
-        while (publishedPosts < 3 && newDeck.length > 0) {
-          const drawnCard = newDeck.shift();
-          if (drawnCard.interest === currentPlayer.interest) {
-            newPlayers[currentIdx] = {
-              ...newPlayers[currentIdx],
-              hand: [...newPlayers[currentIdx].hand, drawnCard]
-            };
-            publishedPosts++;
-          } else {
-            newDiscard.push(drawnCard);
-          }
-        }
-        newDeck = shuffleDeck(newDeck);
+        // Filter deck to only show Content Cards (not Network Cards)
+        const contentCardsOnly = deck.filter(card => !card.type);
+        
+        // Set state to show modal for deck browsing
+        setBotState({
+          phase: 'browse',
+          deckCards: contentCardsOnly,
+          selectedCards: [],
+          maxSelections: 3
+        });
+        setIsTokenPhase(false); // Block token phase until selection is complete
+        setHasPlayedCardThisTurn(true); // Prevent playing another card
+        
         setPlayers(newPlayers);
         setDeck(newDeck);
         setDiscard(newDiscard);
         setTokensDump(newTokensDump);
-        setIsTokenPhase(true);
-        showScoreIndicator(currentIdx, publishedPosts);
         return;
       }
       case 'stalker': {
@@ -913,6 +912,98 @@ export default function GameBoard({ setup }) {
         }));
       }
     }
+  };
+
+  // Add handler for Bot card selection
+  const handleBotSelectCard = (cardIndex) => {
+    if (!botState || botState.phase !== 'browse') return;
+    
+    const card = botState.deckCards[cardIndex];
+    const isSelected = botState.selectedCards.some(selected => 
+      selected.index === cardIndex
+    );
+    
+    if (isSelected) {
+      // Deselect card
+      setBotState(prev => ({
+        ...prev,
+        selectedCards: prev.selectedCards.filter(selected => selected.index !== cardIndex)
+      }));
+    } else {
+      // Select card (max 3, only Content Cards)
+      if (botState.selectedCards.length < botState.maxSelections && !card.type) {
+        setBotState(prev => ({
+          ...prev,
+          selectedCards: [...prev.selectedCards, { card, index: cardIndex }]
+        }));
+      }
+    }
+  };
+
+  // Add handler for Bot confirmation
+  const handleBotConfirm = () => {
+    if (!botState) return;
+    
+    const selectedCards = botState.selectedCards.map(selected => selected.card);
+    const remainingCards = botState.deckCards.filter((_, index) => 
+      !botState.selectedCards.some(selected => selected.index === index)
+    );
+    
+    const newPlayers = [...players];
+    
+    // Add selected cards to current player's wall (with turnPosted flag)
+    let newWall = [...newPlayers[currentIdx].wall];
+    selectedCards.forEach(card => {
+      newWall = [{ ...card, turnPosted: true }, ...newWall];
+    });
+    
+    // Handle wall overflow (max 3 cards)
+    if (newWall.length > 3) {
+      // Remove oldest cards (last in array) and return tokens to owners
+      for (let i = newWall.length - 1; i >= 3; i--) {
+        let removedCard = newWall[i];
+        if (removedCard.tokens && removedCard.tokens.length > 0) {
+          removedCard.tokens.forEach(token => {
+            const ownerIdx = newPlayers.findIndex(p => p.name === token.player.name);
+            if (ownerIdx !== -1) {
+              let ownerTokens = [...newPlayers[ownerIdx].tokens];
+              const tokenIdx = ownerTokens.findIndex(t => t.type === token.type);
+              if (tokenIdx !== -1) {
+                ownerTokens[tokenIdx] = { ...ownerTokens[tokenIdx], count: ownerTokens[tokenIdx].count + 1 };
+              } else {
+                ownerTokens.push({ type: token.type, count: 1, playerId: ownerIdx });
+              }
+              newPlayers[ownerIdx].tokens = sortTokens(ownerTokens);
+            }
+          });
+        }
+        // Remove tokens from card before discarding
+        removedCard = { ...removedCard, tokens: [] };
+        setDiscard(prev => [...prev, removedCard]);
+      }
+      newWall = newWall.slice(0, 3); // Keep only the 3 newest cards
+    }
+    
+    // Update current player's wall
+    newPlayers[currentIdx] = {
+      ...newPlayers[currentIdx],
+      wall: newWall
+    };
+    
+    // Get the original deck cards that were not shown (Network Cards)
+    const networkCardsFromDeck = deck.filter(card => card.type);
+    
+    // Combine remaining Content Cards with Network Cards and shuffle
+    const allRemainingCards = [...remainingCards, ...networkCardsFromDeck];
+    const shuffledDeck = shuffleDeck(allRemainingCards);
+    
+    setPlayers(newPlayers);
+    setDeck(shuffledDeck);
+    
+    // Clear bot state and enter token phase
+    setBotState(null);
+    setIsTokenPhase(true);
+    setHasPlayedCardThisTurn(false);
   };
 
   // Add handler for Content Planner confirmation
@@ -1565,6 +1656,93 @@ export default function GameBoard({ setup }) {
             }}
           >
             Confirm ({contentPlannerState?.selectedCards?.length || 0}/3)
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Bot Modal */}
+      <Dialog 
+        open={botState && botState.phase === 'browse'} 
+        onClose={() => {}} 
+        maxWidth="lg" 
+        fullWidth
+        disableEscapeKeyDown
+        disableBackdropClick
+      >
+        <DialogTitle sx={{ textAlign: 'center', fontWeight: 700 }}>
+          BOT
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', mb: 2 }}>
+              Select up to 3 cards to publish on your wall
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center' }}>
+              Selected: {botState?.selectedCards?.length || 0}/3
+            </Typography>
+          </Box>
+          <Box sx={{ 
+            display: 'grid', 
+            gridTemplateColumns: 'repeat(4, 1fr)', 
+            gap: 2,
+            maxHeight: '60vh',
+            overflowY: 'auto'
+          }}>
+            {botState?.deckCards?.map((card, index) => {
+              const cardInterestData = getInterestData(card.interest);
+              const isSelected = botState?.selectedCards?.some(selected => selected.index === index);
+              const isContentCard = !card.type;
+              return (
+                <Paper key={index} sx={{
+                  p: 1,
+                  minHeight: 80,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  border: `2px solid ${isContentCard ? cardInterestData.color : '#9147ff'}`,
+                  background: isSelected ? '#e3f2fd' : '#fff',
+                  cursor: isContentCard ? 'pointer' : 'not-allowed',
+                  outline: isSelected ? '2px solid #2196f3' : undefined,
+                  boxShadow: isSelected ? '0 0 0 3px #2196f3, 0 5px 10px rgba(0,0,0,0.4)' : '0 1px 3px rgba(0,0,0,0.2)',
+                  borderRadius: 2,
+                  opacity: isContentCard ? 1 : 0.5,
+                  transition: 'all 0.15s',
+                  '&:hover': isContentCard ? { transform: 'scale(1.05)', filter: 'brightness(0.93)' } : {}
+                }} onClick={isContentCard ? () => handleBotSelectCard(index) : undefined}>
+                  {isContentCard ? (
+                    <>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                        <span style={{ fontSize: 20 }}>{cardInterestData.icon}</span>
+                        <span style={{ fontWeight: 700, fontSize: '0.8rem' }}>{card.interest ? card.interest.charAt(0).toUpperCase() + card.interest.slice(1) : ''}</span>
+                      </Box>
+                      <span style={{ fontWeight: 900, fontSize: 22, color: cardInterestData.color }}>{card.value}</span>
+                    </>
+                  ) : (
+                    <Box sx={{ width: '100%', textAlign: 'center' }}>
+                      <div style={{ fontWeight: 700, fontSize: '0.8rem', color: '#9147ff' }}>{card.title}</div>
+                      <div style={{ fontSize: '0.7rem', color: '#666' }}>{card.description}</div>
+                    </Box>
+                  )}
+                </Paper>
+              );
+            })}
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ justifyContent: 'center', pb: 2 }}>
+          <Button 
+            onClick={handleBotConfirm}
+            variant="contained" 
+            color="primary"
+            disabled={!botState || botState.selectedCards.length === 0 || botState.selectedCards.length > 3}
+            sx={{ 
+              borderRadius: 2, 
+              transition: 'all 0.15s', 
+              '&:hover': { transform: 'scale(1.05)', filter: 'brightness(0.93)' },
+              '&:disabled': { opacity: 0.5 }
+            }}
+          >
+            Confirm ({botState?.selectedCards?.length || 0}/3)
           </Button>
         </DialogActions>
       </Dialog>
