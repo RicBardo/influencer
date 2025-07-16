@@ -94,14 +94,14 @@ function createDeck(players, networkCardsEnabled) {
     for (let i = 0; i < 3; i++) newDeck.push({ interest, value: 2 });
     newDeck.push({ interest, value: 3 });
   });
-  // Add Network Cards if enabled (10x TROLL for testing)
+  // Add Network Cards if enabled (10x ACTIVE USER for testing)
   if (networkCardsEnabled) {
-    // 10x TROLL
+    // 10x ACTIVE USER
     for (let i = 0; i < 10; i++) {
       newDeck.push({
-        title: 'TROLL',
-        description: 'Gain 3 Dislike tokens.',
-        effectKey: 'troll',
+        title: 'ACTIVE USER',
+        description: 'Gain 1 Share or Report token.',
+        effectKey: 'active',
         type: 'network',
       });
     }
@@ -173,6 +173,8 @@ export default function GameBoard({ setup }) {
   const [stealState, setStealState] = useState(null); // New state for Steal Idea
   const [contentPlannerState, setContentPlannerState] = useState(null); // New state for Content Planner
   const [botState, setBotState] = useState(null); // New state for Bot
+  const [opinionMakerState, setOpinionMakerState] = useState(null); // New state for Opinion Maker
+  const [activeUserState, setActiveUserState] = useState(null); // New state for Active User
 
   // Utility to show indicator for 3 seconds without mutating players
   function showScoreIndicator(playerIdx, value) {
@@ -745,16 +747,16 @@ export default function GameBoard({ setup }) {
         };
         newDiscard.push(card);
         
-        // Prompt for Follow or Ban token
-        setModalContent({
-          title: 'OPINION MAKER',
-          content: 'Choose 1 token to gain:',
-          actions: [
-            { text: 'Follow', action: () => addTokenToPlayer('follow') },
-            { text: 'Ban', action: () => addTokenToPlayer('ban') }
-          ]
+        // Set state to show Opinion Maker modal
+        setOpinionMakerState({
+          phase: 'select',
+          selectedToken: null
         });
-        setModalOpen(true);
+        
+        setPlayers(newPlayers);
+        setDeck(newDeck);
+        setDiscard(newDiscard);
+        setTokensDump(newTokensDump);
         return;
       }
       case 'active': {
@@ -765,16 +767,16 @@ export default function GameBoard({ setup }) {
         };
         newDiscard.push(card);
         
-        // Prompt for Share or Report token
-        setModalContent({
-          title: 'ACTIVE USER',
-          content: 'Choose 1 token to gain:',
-          actions: [
-            { text: 'Share', action: () => addTokenToPlayer('share') },
-            { text: 'Report', action: () => addTokenToPlayer('report') }
-          ]
+        // Set state to show Active User modal
+        setActiveUserState({
+          phase: 'select',
+          selectedToken: null
         });
-        setModalOpen(true);
+        
+        setPlayers(newPlayers);
+        setDeck(newDeck);
+        setDiscard(newDiscard);
+        setTokensDump(newTokensDump);
         return;
       }
       default:
@@ -1081,6 +1083,86 @@ export default function GameBoard({ setup }) {
     setContentPlannerState(null);
     setIsTokenPhase(true);
     setHasPlayedCardThisTurn(false);
+  };
+
+  // Add handler for Opinion Maker token selection
+  const handleOpinionMakerSelectToken = (tokenType) => {
+    if (!opinionMakerState || opinionMakerState.phase !== 'select') return;
+    
+    const isSelected = opinionMakerState.selectedToken === tokenType;
+    
+    if (isSelected) {
+      // Deselect token
+      setOpinionMakerState(prev => ({
+        ...prev,
+        selectedToken: null
+      }));
+    } else {
+      // Select token
+      setOpinionMakerState(prev => ({
+        ...prev,
+        selectedToken: tokenType
+      }));
+    }
+  };
+
+  // Add handler for Opinion Maker confirmation
+  const handleOpinionMakerConfirm = () => {
+    if (!opinionMakerState || !opinionMakerState.selectedToken) return;
+    
+    const newPlayers = [...players];
+    const token = newPlayers[currentIdx].tokens.find(t => t.type === opinionMakerState.selectedToken);
+    if (token) {
+      token.count += 1;
+    }
+    newPlayers[currentIdx].tokens = sortTokens(newPlayers[currentIdx].tokens);
+    
+    setPlayers(newPlayers);
+    
+    // Clear opinion maker state and enter token phase
+    setOpinionMakerState(null);
+    setIsTokenPhase(true);
+    setSelectedToken(null);
+  };
+
+  // Add handler for Active User token selection
+  const handleActiveUserSelectToken = (tokenType) => {
+    if (!activeUserState || activeUserState.phase !== 'select') return;
+    
+    const isSelected = activeUserState.selectedToken === tokenType;
+    
+    if (isSelected) {
+      // Deselect token
+      setActiveUserState(prev => ({
+        ...prev,
+        selectedToken: null
+      }));
+    } else {
+      // Select token
+      setActiveUserState(prev => ({
+        ...prev,
+        selectedToken: tokenType
+      }));
+    }
+  };
+
+  // Add handler for Active User confirmation
+  const handleActiveUserConfirm = () => {
+    if (!activeUserState || !activeUserState.selectedToken) return;
+    
+    const newPlayers = [...players];
+    const token = newPlayers[currentIdx].tokens.find(t => t.type === activeUserState.selectedToken);
+    if (token) {
+      token.count += 1;
+    }
+    newPlayers[currentIdx].tokens = sortTokens(newPlayers[currentIdx].tokens);
+    
+    setPlayers(newPlayers);
+    
+    // Clear active user state and enter token phase
+    setActiveUserState(null);
+    setIsTokenPhase(true);
+    setSelectedToken(null);
   };
 
   // Add handler for stealing a card from another player's wall
@@ -1773,6 +1855,184 @@ export default function GameBoard({ setup }) {
             }}
           >
             Confirm ({botState?.selectedCards?.length || 0}/3)
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Opinion Maker Modal */}
+      <Dialog 
+        open={opinionMakerState && opinionMakerState.phase === 'select'} 
+        onClose={() => {}} 
+        maxWidth="sm" 
+        fullWidth
+        disableEscapeKeyDown
+        disableBackdropClick
+      >
+        <DialogTitle sx={{ textAlign: 'center', fontWeight: 700 }}>
+          OPINION MAKER
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', mb: 3 }}>
+            Choose a token type
+          </Typography>
+          <Box sx={{ 
+            display: 'flex', 
+            justifyContent: 'center', 
+            gap: 3, 
+            mb: 3 
+          }}>
+            {/* Follow Token */}
+            <Box
+              sx={{
+                width: 60,
+                height: 60,
+                borderRadius: '50%',
+                backgroundColor: getInterestData(currentPlayer.interest).color,
+                color: 'white',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 28,
+                transform: opinionMakerState?.selectedToken === 'follow' ? 'scale(1.15)' : 'scale(1)',
+                boxShadow: opinionMakerState?.selectedToken === 'follow' ? '0 0 0 3px #3d91ff, 0 5px 10px rgba(0,0,0,0.4)' : '0 1px 3px rgba(0,0,0,0.2)',
+                transition: 'all 0.15s',
+                '&:hover': { transform: 'scale(1.05)', filter: 'brightness(0.93)' }
+              }}
+              onClick={() => handleOpinionMakerSelectToken('follow')}
+              title="Follow token"
+            >
+              <PersonAddIcon />
+            </Box>
+            
+            {/* Ban Token */}
+            <Box
+              sx={{
+                width: 60,
+                height: 60,
+                borderRadius: '50%',
+                backgroundColor: getInterestData(currentPlayer.interest).color,
+                color: 'white',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 28,
+                transform: opinionMakerState?.selectedToken === 'ban' ? 'scale(1.15)' : 'scale(1)',
+                boxShadow: opinionMakerState?.selectedToken === 'ban' ? '0 0 0 3px #3d91ff, 0 5px 10px rgba(0,0,0,0.4)' : '0 1px 3px rgba(0,0,0,0.2)',
+                transition: 'all 0.15s',
+                '&:hover': { transform: 'scale(1.05)', filter: 'brightness(0.93)' }
+              }}
+              onClick={() => handleOpinionMakerSelectToken('ban')}
+              title="Ban token"
+            >
+              <BlockIcon />
+            </Box>
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ justifyContent: 'center', pb: 2 }}>
+          <Button 
+            onClick={handleOpinionMakerConfirm}
+            variant="contained" 
+            color="primary"
+            disabled={!opinionMakerState || !opinionMakerState.selectedToken}
+            sx={{ 
+              borderRadius: 2, 
+              transition: 'all 0.15s', 
+              '&:hover': { transform: 'scale(1.05)', filter: 'brightness(0.93)' },
+              '&:disabled': { opacity: 0.5 }
+            }}
+          >
+            Confirm
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Active User Modal */}
+      <Dialog 
+        open={activeUserState && activeUserState.phase === 'select'} 
+        onClose={() => {}} 
+        maxWidth="sm" 
+        fullWidth
+        disableEscapeKeyDown
+        disableBackdropClick
+      >
+        <DialogTitle sx={{ textAlign: 'center', fontWeight: 700 }}>
+          ACTIVE USER
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', mb: 3 }}>
+            Choose a token type
+          </Typography>
+          <Box sx={{ 
+            display: 'flex', 
+            justifyContent: 'center', 
+            gap: 3, 
+            mb: 3 
+          }}>
+            {/* Share Token */}
+            <Box
+              sx={{
+                width: 60,
+                height: 60,
+                borderRadius: '50%',
+                backgroundColor: getInterestData(currentPlayer.interest).color,
+                color: 'white',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 28,
+                transform: activeUserState?.selectedToken === 'share' ? 'scale(1.15)' : 'scale(1)',
+                boxShadow: activeUserState?.selectedToken === 'share' ? '0 0 0 3px #3d91ff, 0 5px 10px rgba(0,0,0,0.4)' : '0 1px 3px rgba(0,0,0,0.2)',
+                transition: 'all 0.15s',
+                '&:hover': { transform: 'scale(1.05)', filter: 'brightness(0.93)' }
+              }}
+              onClick={() => handleActiveUserSelectToken('share')}
+              title="Share token"
+            >
+              <ShareIcon />
+            </Box>
+            
+            {/* Report Token */}
+            <Box
+              sx={{
+                width: 60,
+                height: 60,
+                borderRadius: '50%',
+                backgroundColor: getInterestData(currentPlayer.interest).color,
+                color: 'white',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 28,
+                transform: activeUserState?.selectedToken === 'report' ? 'scale(1.15)' : 'scale(1)',
+                boxShadow: activeUserState?.selectedToken === 'report' ? '0 0 0 3px #3d91ff, 0 5px 10px rgba(0,0,0,0.4)' : '0 1px 3px rgba(0,0,0,0.2)',
+                transition: 'all 0.15s',
+                '&:hover': { transform: 'scale(1.05)', filter: 'brightness(0.93)' }
+              }}
+              onClick={() => handleActiveUserSelectToken('report')}
+              title="Report token"
+            >
+              <ReportIcon />
+            </Box>
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ justifyContent: 'center', pb: 2 }}>
+          <Button 
+            onClick={handleActiveUserConfirm}
+            variant="contained" 
+            color="primary"
+            disabled={!activeUserState || !activeUserState.selectedToken}
+            sx={{ 
+              borderRadius: 2, 
+              transition: 'all 0.15s', 
+              '&:hover': { transform: 'scale(1.05)', filter: 'brightness(0.93)' },
+              '&:disabled': { opacity: 0.5 }
+            }}
+          >
+            Confirm
           </Button>
         </DialogActions>
       </Dialog>
