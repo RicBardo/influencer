@@ -156,7 +156,7 @@ function sortTokens(tokens) {
 export default function GameBoard({ setup }) {
   const [deck, setDeck] = useState([]);
   const [discard, setDiscard] = useState([]);
-  const [players, setPlayers] = useState([]); // {name, interest, wall, hand, position, tokens, isFollowing, followers}
+  const [players, setPlayers] = useState([]); // {name, interest, wall, hand, position, tokens, following, followers}
   const [currentIdx, setCurrentIdx] = useState(0);
   const [mustDraw, setMustDraw] = useState(true);
   const [isTokenPhase, setIsTokenPhase] = useState(false);
@@ -197,7 +197,7 @@ export default function GameBoard({ setup }) {
       hand: [],
       position: 0,
       tokens: createTokens(idx, setup.players.length),
-      isFollowing: null,
+      following: [],
       followers: []
     }));
     // Create and shuffle deck
@@ -238,12 +238,13 @@ export default function GameBoard({ setup }) {
     let log = '';
 
     const activeInterests = new Set([currentPlayer.interest]);
-    if (currentPlayer.isFollowing) {
-      const followedPlayer = currentPlayer.isFollowing;
-      if (followedPlayer) {
-        activeInterests.add(followedPlayer.interest);
-        log += `${currentPlayer.name} is following ${followedPlayer.name}, gaining their interest: ${followedPlayer.interest}.\n`;
-      }
+    if (currentPlayer.following && currentPlayer.following.length > 0) {
+      currentPlayer.following.forEach(followedPlayer => {
+        if (followedPlayer) {
+          activeInterests.add(followedPlayer.interest);
+          log += `${currentPlayer.name} is following ${followedPlayer.name}, gaining their interest: ${followedPlayer.interest}.\n`;
+        }
+      });
     }
 
     // Score your own wall
@@ -422,14 +423,13 @@ export default function GameBoard({ setup }) {
     const newPlayers = [...players];
     
     if (selectedToken.type === 'follow') {
-      // If player is already following someone, just update the link.
-      if (newPlayers[currentIdx].isFollowing) {
-        const previouslyFollowedPlayer = newPlayers[currentIdx].isFollowing;
-        if (previouslyFollowedPlayer.followers) {
-          previouslyFollowedPlayer.followers = previouslyFollowedPlayer.followers.filter(p => p !== newPlayers[currentIdx]);
-        }
+      // Add the new follow to the array
+      if (!newPlayers[currentIdx].following) {
+        newPlayers[currentIdx].following = [];
       }
-      newPlayers[currentIdx].isFollowing = newPlayers[playerIdx];
+      newPlayers[currentIdx].following.push(newPlayers[playerIdx]);
+      
+      // Add current player to the followed player's followers list
       if (!newPlayers[playerIdx].followers) newPlayers[playerIdx].followers = [];
       newPlayers[playerIdx].followers.push(newPlayers[currentIdx]);
     } else if (selectedToken.type === 'ban') {
@@ -445,15 +445,20 @@ export default function GameBoard({ setup }) {
           }
         });
       });
-      // Remove Follow token (if banned player is following someone)
-      if (bannedPlayer.isFollowing) {
-        removedTokens.push({ type: 'follow', player: bannedPlayer });
-        bannedPlayer.isFollowing = null;
+      // Remove Follow tokens (if banned player is following someone)
+      if (bannedPlayer.following && bannedPlayer.following.length > 0) {
+        bannedPlayer.following.forEach(() => {
+          removedTokens.push({ type: 'follow', player: bannedPlayer });
+        });
+        bannedPlayer.following = [];
       }
-      // Remove banned player from any followers arrays
+      // Remove banned player from any followers arrays and following arrays
       newPlayers.forEach(p => {
         if (p.followers) {
           p.followers = p.followers.filter(f => f.name !== bannedPlayer.name);
+        }
+        if (p.following) {
+          p.following = p.following.filter(f => f.name !== bannedPlayer.name);
         }
       });
       // Add all removed tokens and the Ban token itself to the dump
@@ -629,16 +634,11 @@ export default function GameBoard({ setup }) {
         };
         newDiscard.push(card);
         
-        // Collect all players' hands into a pile
+        // Collect all cards (Content and Network) from all players' hands
         let allCards = [];
-        players.forEach(player => {
+        newPlayers.forEach(player => {
           allCards.push(...player.hand);
         });
-        
-        // Add 3 new Content Cards of current player's interest
-        for (let i = 0; i < 3; i++) {
-          allCards.push({ interest: currentPlayer.interest, value: 1 });
-        }
         
         // Set state to show modal with all cards for selection
         setContentPlannerState({
@@ -760,6 +760,7 @@ export default function GameBoard({ setup }) {
         return;
       }
       case 'active': {
+        console.log('ACTIVE USER: Card played, setting up modal');
         // Remove network card from hand and add to discard pile immediately
         newPlayers[currentIdx] = {
           ...newPlayers[currentIdx],
@@ -773,6 +774,7 @@ export default function GameBoard({ setup }) {
           selectedToken: null
         });
         
+        console.log('ACTIVE USER: Modal state set, players updated');
         setPlayers(newPlayers);
         setDeck(newDeck);
         setDiscard(newDiscard);
@@ -821,7 +823,11 @@ export default function GameBoard({ setup }) {
     // Share: only on other players' cards, and only if card matches your innate or acquired interest
     if (selectedToken.type === 'share' && targetPlayer !== currentPlayer) {
       const interests = [currentPlayer.interest];
-      if (currentPlayer.isFollowing) interests.push(currentPlayer.isFollowing.interest);
+      if (currentPlayer.following && currentPlayer.following.length > 0) {
+        currentPlayer.following.forEach(followedPlayer => {
+          interests.push(followedPlayer.interest);
+        });
+      }
       if (interests.includes(card.interest)) {
         return true;
       }
@@ -845,8 +851,8 @@ export default function GameBoard({ setup }) {
       return false;
     }
     
-    // For follow tokens, check if already following someone
-    if (selectedToken.type === 'follow' && currentPlayer.isFollowing) return false;
+    // For follow tokens, check if already following this specific player
+    if (selectedToken.type === 'follow' && currentPlayer.following && currentPlayer.following.some(p => p.name === targetPlayer.name)) return false;
     
     // For ban tokens, check if already has a ban token on them
     if (selectedToken.type === 'ban') {
@@ -1150,10 +1156,17 @@ export default function GameBoard({ setup }) {
   const handleActiveUserConfirm = () => {
     if (!activeUserState || !activeUserState.selectedToken) return;
     
+    console.log('ACTIVE USER: Confirming token selection:', activeUserState.selectedToken);
+    
     const newPlayers = [...players];
     const token = newPlayers[currentIdx].tokens.find(t => t.type === activeUserState.selectedToken);
+    console.log('ACTIVE USER: Found token:', token);
     if (token) {
+      console.log('ACTIVE USER: Before adding token, count was:', token.count);
       token.count += 1;
+      console.log('ACTIVE USER: After adding token, count is:', token.count);
+    } else {
+      console.log('ACTIVE USER: No token found!');
     }
     newPlayers[currentIdx].tokens = sortTokens(newPlayers[currentIdx].tokens);
     
@@ -1292,7 +1305,7 @@ export default function GameBoard({ setup }) {
     }}>
       {players.map((player, i) => {
         const isCurrentPlayer = i === currentIdx;
-        const followers = players.filter(p => p.isFollowing && p.isFollowing.name === player.name);
+        const followers = players.filter(p => p.following && p.following.some(followedPlayer => followedPlayer.name === player.name));
         const cardInterestData = getInterestData(player.interest);
         const playerColor = cardInterestData.color;
         return (
@@ -1429,10 +1442,14 @@ export default function GameBoard({ setup }) {
                       <span style={{ fontSize: 22 }}>{cardInterestData.icon}</span>
                       <Typography>{player.interest ? player.interest.charAt(0).toUpperCase() + player.interest.slice(1) : ''}</Typography>
                     </Box>
-                    {player.isFollowing && (
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0, mt: 0 }}>
-                        <span style={{ fontSize: 16 }}>{getInterestData(player.isFollowing.interest).icon}</span>
-                        <span style={{ fontSize: 13, color: '#666' }}>{player.isFollowing.interest.charAt(0).toUpperCase() + player.isFollowing.interest.slice(1)}</span>
+                    {player.following && player.following.length > 0 && (
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0 }}>
+                        {player.following.map((followedPlayer, idx) => (
+                          <Box key={idx} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <span style={{ fontSize: 16 }}>{getInterestData(followedPlayer.interest).icon}</span>
+                            <span style={{ fontSize: 13, color: '#666' }}>{followedPlayer.interest.charAt(0).toUpperCase() + followedPlayer.interest.slice(1)}</span>
+                          </Box>
+                        ))}
                       </Box>
                     )}
                   </Box>
@@ -1694,7 +1711,6 @@ export default function GameBoard({ setup }) {
         maxWidth="lg" 
         fullWidth
         disableEscapeKeyDown
-        disableBackdropClick
       >
         <DialogTitle sx={{ textAlign: 'center', fontWeight: 700 }}>
           CONTENT PLANNER
@@ -1779,7 +1795,6 @@ export default function GameBoard({ setup }) {
         maxWidth="lg" 
         fullWidth
         disableEscapeKeyDown
-        disableBackdropClick
       >
         <DialogTitle sx={{ textAlign: 'center', fontWeight: 700 }}>
           BOT
@@ -1866,7 +1881,6 @@ export default function GameBoard({ setup }) {
         maxWidth="sm" 
         fullWidth
         disableEscapeKeyDown
-        disableBackdropClick
       >
         <DialogTitle sx={{ textAlign: 'center', fontWeight: 700 }}>
           OPINION MAKER
@@ -1955,7 +1969,6 @@ export default function GameBoard({ setup }) {
         maxWidth="sm" 
         fullWidth
         disableEscapeKeyDown
-        disableBackdropClick
       >
         <DialogTitle sx={{ textAlign: 'center', fontWeight: 700 }}>
           ACTIVE USER
