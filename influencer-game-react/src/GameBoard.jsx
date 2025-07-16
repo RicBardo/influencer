@@ -94,14 +94,14 @@ function createDeck(players, networkCardsEnabled) {
     for (let i = 0; i < 3; i++) newDeck.push({ interest, value: 2 });
     newDeck.push({ interest, value: 3 });
   });
-  // Add Network Cards if enabled (10x BOT for testing)
+  // Add Network Cards if enabled (10x STALKER for testing)
   if (networkCardsEnabled) {
-    // 10x BOT
+    // 10x STALKER
     for (let i = 0; i < 10; i++) {
       newDeck.push({
-        title: 'BOT',
-        description: 'Browse the deck, choose up to 3 Content Cards and publish them directly on your wall, then shuffle the deck.',
-        effectKey: 'bot',
+        title: 'STALKER',
+        description: 'Gain 3 Like tokens.',
+        effectKey: 'stalker',
         type: 'network',
       });
     }
@@ -691,9 +691,23 @@ export default function GameBoard({ setup }) {
         
         // Gain 3 Like tokens
         const token = newPlayers[currentIdx].tokens.find(t => t.type === 'like');
-        token.count += 3;
-        effectText = 'STALKER:\nGain 3 Like tokens.';
-        break;
+        console.log('STALKER: Found like token:', token);
+        if (token) {
+          console.log('STALKER: Before adding tokens, count was:', token.count);
+          token.count += 3;
+          console.log('STALKER: After adding tokens, count is:', token.count);
+        } else {
+          console.log('STALKER: No like token found!');
+        }
+        
+        // Enter token phase and show End Turn button
+        setPlayers(newPlayers);
+        setDeck(newDeck);
+        setDiscard(newDiscard);
+        setTokensDump(newTokensDump);
+        setIsTokenPhase(true);
+        setSelectedToken(null);
+        return;
       }
       case 'troll': {
         // Remove network card from hand and add to discard pile immediately
@@ -705,7 +719,9 @@ export default function GameBoard({ setup }) {
         
         // Gain 3 Dislike tokens
         const token = newPlayers[currentIdx].tokens.find(t => t.type === 'dislike');
-        token.count += 3;
+        if (token) {
+          token.count += 3;
+        }
         effectText = 'TROLL:\nGain 3 Dislike tokens.';
         break;
       }
@@ -1509,13 +1525,15 @@ export default function GameBoard({ setup }) {
               {/* Token Pool */}
               <Box sx={{ width: '100%', minHeight: 40, background: '#f8f8ff', borderRadius: 1, p: 1, px: 2, boxSizing: 'border-box' }}>
                 <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 0.5, justifyContent: 'center' }}>
-                  {sortTokens(player.tokens).map((token, idx) => {
+                  {sortTokens(player.tokens).map((token, tokenIdx) => {
                     const isSelectable = i === currentIdx && isTokenPhase && token.count > 0;
                     // Only highlight as selected if this is the current player
                     const isSelected = i === currentIdx && selectedToken && selectedToken.type === token.type;
-                    return (
+                    
+                    // Create multiple token elements based on count
+                    return Array.from({ length: token.count }, (_, tokenInstanceIdx) => (
                       <Box
-                        key={idx}
+                        key={`${tokenIdx}-${tokenInstanceIdx}`}
                         sx={{
                           width: 40,
                           height: 40,
@@ -1537,7 +1555,7 @@ export default function GameBoard({ setup }) {
                       >
                         {getMaterialIcon(token.type)}
                       </Box>
-                    );
+                    ));
                   })}
                 </Box>
               </Box>
