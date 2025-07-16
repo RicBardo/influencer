@@ -94,17 +94,17 @@ function createDeck(players, networkCardsEnabled) {
     for (let i = 0; i < 3; i++) newDeck.push({ interest, value: 2 });
     newDeck.push({ interest, value: 3 });
   });
-  // Add Network Cards if enabled (10x ACTIVE USER for testing)
+  // Add Network Cards if enabled (1 of each type)
   if (networkCardsEnabled) {
-    // 10x ACTIVE USER
-    for (let i = 0; i < 10; i++) {
+    // Add all 10 Network Cards (1 of each type)
+    NETWORK_CARDS.forEach(card => {
       newDeck.push({
-        title: 'ACTIVE USER',
-        description: 'Gain 1 Share or Report token.',
-        effectKey: 'active',
+        title: card.title,
+        description: card.description,
+        effectKey: card.effectKey,
         type: 'network',
       });
-    }
+    });
   }
   return shuffleDeck(newDeck);
 }
