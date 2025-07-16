@@ -94,14 +94,14 @@ function createDeck(players, networkCardsEnabled) {
     for (let i = 0; i < 3; i++) newDeck.push({ interest, value: 2 });
     newDeck.push({ interest, value: 3 });
   });
-  // Add Network Cards if enabled (10x STALKER for testing)
+  // Add Network Cards if enabled (10x TROLL for testing)
   if (networkCardsEnabled) {
-    // 10x STALKER
+    // 10x TROLL
     for (let i = 0; i < 10; i++) {
       newDeck.push({
-        title: 'STALKER',
-        description: 'Gain 3 Like tokens.',
-        effectKey: 'stalker',
+        title: 'TROLL',
+        description: 'Gain 3 Dislike tokens.',
+        effectKey: 'troll',
         type: 'network',
       });
     }
@@ -719,11 +719,23 @@ export default function GameBoard({ setup }) {
         
         // Gain 3 Dislike tokens
         const token = newPlayers[currentIdx].tokens.find(t => t.type === 'dislike');
+        console.log('TROLL: Found dislike token:', token);
         if (token) {
+          console.log('TROLL: Before adding tokens, count was:', token.count);
           token.count += 3;
+          console.log('TROLL: After adding tokens, count is:', token.count);
+        } else {
+          console.log('TROLL: No dislike token found!');
         }
-        effectText = 'TROLL:\nGain 3 Dislike tokens.';
-        break;
+        
+        // Enter token phase and show End Turn button
+        setPlayers(newPlayers);
+        setDeck(newDeck);
+        setDiscard(newDiscard);
+        setTokensDump(newTokensDump);
+        setIsTokenPhase(true);
+        setSelectedToken(null);
+        return;
       }
       case 'opinion': {
         // Remove network card from hand and add to discard pile immediately
