@@ -307,22 +307,32 @@ export default function GameBoard({ setup }) {
   // Draw card logic
   const handleDrawCard = () => {
     if (!mustDraw) return;
-    if (deck.length === 0) {
-      // Reshuffle discard into deck
-      setDeck(shuffleDeck(discard));
-      setDiscard([]);
-      return;
+    
+    let currentDeck = [...deck];
+    let currentDiscard = [...discard];
+    
+    // If deck is empty, reshuffle discard pile into deck
+    if (currentDeck.length === 0) {
+      if (currentDiscard.length === 0) {
+        // No cards left to draw
+        return;
+      }
+      currentDeck = shuffleDeck(currentDiscard);
+      currentDiscard = [];
     }
+    
     const newPlayers = [...players];
     newPlayers[currentIdx] = {
       ...currentPlayer,
-      hand: [...currentPlayer.hand, deck[0]]
+      hand: [...currentPlayer.hand, currentDeck[0]]
     };
     setPlayers(newPlayers);
-    setDeck(deck.slice(1));
+    setDeck(currentDeck.slice(1));
+    setDiscard(currentDiscard);
+    
     // After each draw in handleDrawCard:
-    console.log('Player', currentPlayer.name, 'drew', deck[0]);
-    console.log('Deck after draw:', deck.slice(1).map(card => card.interest + (card.type ? ' (network)' : '')));
+    console.log('Player', currentPlayer.name, 'drew', currentDeck[0]);
+    console.log('Deck after draw:', currentDeck.slice(1).map(card => card.interest + (card.type ? ' (network)' : '')));
     setMustDraw(false);
   };
 
@@ -692,6 +702,7 @@ export default function GameBoard({ setup }) {
         newDiscard.push(card);
         
         // Gain 3 Like tokens
+        console.log('STALKER: Current player tokens:', newPlayers[currentIdx].tokens);
         const token = newPlayers[currentIdx].tokens.find(t => t.type === 'like');
         console.log('STALKER: Found like token:', token);
         if (token) {
@@ -1159,6 +1170,7 @@ export default function GameBoard({ setup }) {
     console.log('ACTIVE USER: Confirming token selection:', activeUserState.selectedToken);
     
     const newPlayers = [...players];
+    console.log('ACTIVE USER: Current player tokens:', newPlayers[currentIdx].tokens);
     const token = newPlayers[currentIdx].tokens.find(t => t.type === activeUserState.selectedToken);
     console.log('ACTIVE USER: Found token:', token);
     if (token) {
